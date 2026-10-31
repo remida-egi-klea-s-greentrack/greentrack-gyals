@@ -5,3 +5,6 @@ __pycache__/
 .terraform/
 *.tfstate
 *.tfstate.backup
+.venv/
+data/raw/
+data/lakehouse/
