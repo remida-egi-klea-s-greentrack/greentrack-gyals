@@ -183,16 +183,15 @@ def main():
         df.writeTo(f"local.gold.{name}").createOrReplace()
         print(f"Wrote local.gold.{name}: {spark.table(f'local.gold.{name}').count():,} rows")
 
-    # Plain Parquet copy of the hourly table for teammates who don't use Spark/Iceberg.
+    # Plain copies of every gold table (Parquet + CSV) for teammates who don't use Spark.
     # timestamp_ntz = timestamp without timezone, as ML's input_data.py expects.
-    (
-        hourly_df.withColumn("timestamp", F.col("timestamp").cast("timestamp_ntz"))
-        .orderBy("timestamp")
-        .coalesce(1)
-        .write.mode("overwrite")
-        .parquet(f"{EXPORT_DIR}/gold_hourly_consumption")
-    )
-    print("Exported data/lakehouse/exports/gold_hourly_consumption/")
+    for name, df in tables.items():
+        if "timestamp" in df.columns:
+            df = df.withColumn("timestamp", F.col("timestamp").cast("timestamp_ntz")).orderBy("timestamp")
+        out = df.coalesce(1)
+        out.write.mode("overwrite").parquet(f"{EXPORT_DIR}/{name}")
+        out.write.mode("overwrite").option("header", True).csv(f"{EXPORT_DIR}/{name}_csv")
+    print("Exported all gold tables to data/lakehouse/exports/")
 
     summary = hourly_df.agg(
         F.sum(F.col("complete").cast("int")).alias("complete"),
