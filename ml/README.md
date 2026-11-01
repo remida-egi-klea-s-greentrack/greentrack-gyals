@@ -81,3 +81,82 @@ The current hourly reference dataset was generated locally.
 The raw-to-hourly transformation must be made reproducible
 through the data engineering pipeline before end-to-end
 reproducibility can be claimed.
+
+## ML-03 — XGBoost forecasting
+
+### Approach
+
+A single XGBoost regressor predicts each of the next 24 hours
+independently, using six features:
+
+- hour
+- day_of_week
+- month
+- lag_24h_kwh
+- lag_168h_kwh
+- mean_last_24h_kwh
+
+Historical features use only observations available at the forecast
+origin. Calendar features describe the target hour.
+
+The previous 24-hour mean requires 24 valid observations;
+otherwise, it is NaN. Missing historical features are retained
+because XGBoost supports missing feature values.
+
+### Training
+
+- Training targets: 2006-12-17 through 2009-12-31
+- Training observations: 26,471
+- Estimators: 200
+- Maximum tree depth: 4
+- Learning rate: 0.05
+- Subsample: 0.9
+- Column subsample: 0.9
+- Random seed: 42
+- Tree method: hist
+
+The model is trained once and is not retrained during validation.
+
+### Validation comparison
+
+Period: January–May 2010
+
+- Eligible forecast days: 121
+- Excluded forecast days: 30
+- Hourly predictions: 2,904
+
+| Model | RMSE (kWh) | MAE (kWh) | MAPE (%) |
+| --- | ---: | ---: | ---: |
+| Daily naive | 0.8818 | 0.6185 | 73.31 |
+| Weekly naive | 0.8721 | 0.6108 | 72.26 |
+| XGBoost | 0.6232 | 0.4675 | 60.73 |
+
+XGBoost achieved a 28.54% lower validation RMSE than
+the weekly baseline and outperformed it on 107 of 121 days.
+
+These figures are validation results, not final test performance.
+
+### Reproduce the experiment
+
+From the repository root:
+
+python -m ml.forecasting.run_xgboost_validation \
+  --input /path/to/hourly_consumption.parquet \
+  --output /path/to/report-directory
+
+The script saves:
+
+- Hourly predictions for all three models
+- Per-day and overall error metrics
+- Excluded days and their reasons
+- The trained XGBoost model (model.ubj)
+- An experiment manifest with model parameters and input checksum
+
+### Limitations
+
+- No hyperparameter optimization has been performed.
+- The June–November 2010 test period remains reserved.
+- Validation performance does not guarantee test performance.
+- Nonnegative predictions are not enforced by the regressor.
+- End-to-end reproducibility depends on the upstream hourly ETL.
+- SageMaker deployment is outside ML-03's scope.
