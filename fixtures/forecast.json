@@ -1,0 +1,18 @@
+{
+  "generated_at": "2026-01-01T10:00:00",
+  "unit": "kWh",
+  "predictions": [
+    {
+      "timestamp": "2026-01-01T11:00:00",
+      "predicted_kwh": 1.3,
+      "lower_bound": 1.0,
+      "upper_bound": 1.6
+    },
+    {
+      "timestamp": "2026-01-01T12:00:00",
+      "predicted_kwh": 1.4,
+      "lower_bound": 1.1,
+      "upper_bound": 1.7
+    }
+  ]
+}

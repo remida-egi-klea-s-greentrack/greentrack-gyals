@@ -1,0 +1,26 @@
+{
+  "unit": "kWh",
+  "records": [
+    {
+      "timestamp": "2026-01-01T08:00:00",
+      "global_active_power_kwh": 1.1,
+      "sub_metering_1_kwh": 0.1,
+      "sub_metering_2_kwh": 0.2,
+      "sub_metering_3_kwh": 0.5
+    },
+    {
+      "timestamp": "2026-01-01T09:00:00",
+      "global_active_power_kwh": 1.4,
+      "sub_metering_1_kwh": 0.2,
+      "sub_metering_2_kwh": 0.2,
+      "sub_metering_3_kwh": 0.6
+    },
+    {
+      "timestamp": "2026-01-01T10:00:00",
+      "global_active_power_kwh": 1.25,
+      "sub_metering_1_kwh": 0.1,
+      "sub_metering_2_kwh": 0.3,
+      "sub_metering_3_kwh": 0.6
+    }
+  ]
+}
