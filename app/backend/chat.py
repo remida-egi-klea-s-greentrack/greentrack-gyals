@@ -3,7 +3,7 @@ import json
 from app.backend.common import load_fixture, response
 
 
-def handler(event, context):
+def handler(event, context, loader=load_fixture):
     """POST /chat: kthen përgjigjen e asistentit (e rreme për momentin)."""
     try:
         body = json.loads(event.get("body") or "{}")
@@ -13,5 +13,5 @@ def handler(event, context):
     if not body.get("message"):
         return response(400, {"error": "Field 'message' is required"})
 
-    data = load_fixture("chat.json")
+    data = loader("chat.json")
     return response(200, data)
