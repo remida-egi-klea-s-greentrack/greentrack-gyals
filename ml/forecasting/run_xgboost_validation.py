@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import math
 from pathlib import Path
 
 import pandas as pd
@@ -83,7 +84,11 @@ def main():
         "eligible_days": int(predictions["day"].nunique()),
         "excluded_days": len(exclusions),
         "prediction_hours": len(predictions),
-        "model_parameters": model.get_params(),
+        # Represent the NaN missing-value sentinel as JSON null in metadata only.
+        "model_parameters": {
+            name: None if isinstance(value, float) and math.isnan(value) else value
+            for name, value in model.get_params().items()
+        },
         "xgboost_version": xgboost.__version__,
         "pandas_version": pd.__version__,
         "input_sha256": hashlib.sha256(
@@ -92,7 +97,7 @@ def main():
     }
 
     (args.output / "manifest.json").write_text(
-        json.dumps(manifest, indent=2) + "\n"
+        json.dumps(manifest, indent=2, allow_nan=False) + "\n"
     )
 
     print("Report saved to:", args.output)
