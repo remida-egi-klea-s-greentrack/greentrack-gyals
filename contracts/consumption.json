@@ -1,17 +1,34 @@
 {
-  "description": "Hourly electricity consumption record (Developer A -> B and C)",
+  "description": "Hourly electricity consumption record, gold table gold_hourly_consumption (Developer A -> B and C)",
   "fields": {
-    "timestamp": "ISO 8601 string, e.g. 2026-01-01T10:00:00",
-    "global_active_power_kwh": "float, energy used in that hour in kWh",
-    "sub_metering_1_kwh": "float, kitchen",
-    "sub_metering_2_kwh": "float, laundry",
-    "sub_metering_3_kwh": "float, water heater and AC"
+    "timestamp": "Start of the hour, ISO 8601 without timezone, e.g. 2008-01-15T18:00:00. Every hour in the range is present, including hours with no data.",
+    "global_active_power_kwh": "float, total energy used in that hour in kWh. Null when complete is false.",
+    "sub_metering_1_kwh": "float, kitchen, kWh. Null when complete is false.",
+    "sub_metering_2_kwh": "float, laundry, kWh. Null when complete is false.",
+    "sub_metering_3_kwh": "float, water heater and AC, kWh. Null when complete is false.",
+    "minutes_recorded": "integer 0-60, how many minutes of that hour have valid readings",
+    "complete": "boolean, true only when all 60 minutes have valid readings"
+  },
+  "unit_conversion": {
+    "global_active_power_kwh": "sum of the 60 per-minute Global_active_power values (kW) / 60",
+    "sub_metering_kwh": "sum of the 60 per-minute Sub_metering values (Wh) / 1000"
   },
   "example": {
-    "timestamp": "2026-01-01T10:00:00",
-    "global_active_power_kwh": 1.25,
-    "sub_metering_1_kwh": 0.1,
-    "sub_metering_2_kwh": 0.3,
-    "sub_metering_3_kwh": 0.6
+    "timestamp": "2008-01-15T18:00:00",
+    "global_active_power_kwh": 2.35,
+    "sub_metering_1_kwh": 0.0,
+    "sub_metering_2_kwh": 0.31,
+    "sub_metering_3_kwh": 1.02,
+    "minutes_recorded": 60,
+    "complete": true
+  },
+  "example_incomplete": {
+    "timestamp": "2008-01-15T19:00:00",
+    "global_active_power_kwh": null,
+    "sub_metering_1_kwh": null,
+    "sub_metering_2_kwh": null,
+    "sub_metering_3_kwh": null,
+    "minutes_recorded": 42,
+    "complete": false
   }
 }
