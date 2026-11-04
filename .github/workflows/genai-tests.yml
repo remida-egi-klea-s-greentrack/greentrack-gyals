@@ -1,0 +1,27 @@
+name: GenAI Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test-genai:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: genai/requirements-test.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r genai/requirements-test.txt
+
+      - name: Run GenAI tests
+        run: python -m pytest genai/tests/ -q -W error
