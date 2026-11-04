@@ -1,3 +1,4 @@
+import datetime
 from app.backend.common import response
 
 
@@ -6,7 +7,10 @@ def default_loader():
     try:
         from app.adapters.gold_loader import detect_anomalies_simple
         anomalies = detect_anomalies_simple(threshold_kwh=5.0)
-        return {"anomalies": anomalies}
+        return {
+            "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "anomalies": anomalies
+        }
     except Exception as e:
         print(f"⚠️  Failed to detect anomalies: {e}")
         print("📦 Falling back to fixtures...")
