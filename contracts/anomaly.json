@@ -6,14 +6,31 @@
     "severity_values": "low, medium, high"
   },
   "example": {
-    "generated_at": "2026-01-01T10:00:00",
+    "generated_at": "2026-01-01T10:00:00+00:00",
     "anomalies": [
       {
         "timestamp": "2026-01-01T03:00:00",
         "consumption_kwh": 4.8,
-        "anomaly_score": 0.92,
+        "anomaly_score": 0.9995,
         "severity": "high"
       }
     ]
+  },
+  "field_notes": {
+    "generated_at": "UTC ISO 8601 timestamp with timezone offset; indicates when the response was generated.",
+    "timestamp": "Hour-start timestamp of the electricity observation. Currently timezone-naive; production timezone semantics must be agreed with Developers A and C.",
+    "consumption_kwh": "Observed electricity consumption in kWh. Incomplete observations are not returned as anomalies.",
+    "anomaly_score": "Number from 0 to 1, calibrated against the model's training score distribution. Higher means more unusual. It is not the probability of a real anomaly.",
+    "severity": "Stable UI-facing category: low, medium, or high. The dashboard should use this field for alert styling rather than applying its own score thresholds."
+  },
+  "local_baseline": {
+    "method": "global_hour_of_week_log_mad",
+    "calibration": "Empirical percentile of training absolute robust z-scores",
+    "severity_thresholds": {
+      "low": "0.99 <= score < 0.995",
+      "medium": "0.995 <= score < 0.999",
+      "high": "score >= 0.999"
+    },
+    "note": "Thresholds describe the current local baseline. Future models should preserve the response contract and document their calibration."
   }
 }
