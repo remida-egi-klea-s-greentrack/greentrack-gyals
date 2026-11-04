@@ -183,7 +183,7 @@ def main():
         df.writeTo(f"local.gold.{name}").createOrReplace()
         print(f"Wrote local.gold.{name}: {spark.table(f'local.gold.{name}').count():,} rows")
 
-    # Plain copies of every gold table (Parquet + CSV) for teammates who don't use Spark.
+  
     # timestamp_ntz = timestamp without timezone, as ML's input_data.py expects.
     for name, df in tables.items():
         if "timestamp" in df.columns:
