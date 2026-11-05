@@ -10,11 +10,12 @@ MODEL_COLUMNS = {
 }
 
 
-def baseline_error_metrics(
+def forecast_error_metrics(
     predictions: pd.DataFrame,
+    model_columns: dict[str, str],
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Calculate per-day and pooled overall RMSE, MAE and MAPE."""
-    required = {"day", "actual_kwh", *MODEL_COLUMNS.values()}
+    required = {"day", "actual_kwh", *model_columns.values()}
 
     if not required.issubset(predictions.columns):
         raise ValueError("Missing required prediction columns")
@@ -36,7 +37,7 @@ def baseline_error_metrics(
     daily_rows = []
     overall_rows = []
 
-    for model, column in MODEL_COLUMNS.items():
+    for model, column in model_columns.items():
         forecast = predictions[column].to_numpy(dtype=float)
         errors = forecast - actual
 
@@ -75,3 +76,11 @@ def baseline_error_metrics(
         pd.DataFrame(daily_rows),
         pd.DataFrame(overall_rows),
     )
+
+
+
+def baseline_error_metrics(
+    predictions: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Preserve the existing daily/weekly baseline evaluation API."""
+    return forecast_error_metrics(predictions, MODEL_COLUMNS)
