@@ -149,3 +149,20 @@ def test_duplicate_timestamps_are_rejected(scenario):
         add_xgboost_predictions(
             Lag24Model(), consumption, malformed
         )
+
+
+def test_negative_predictions_are_clipped_to_zero(scenario):
+    consumption, baseline = scenario
+
+    class NegativeModel:
+        def predict(self, features):
+            values = np.ones(24)
+            values[0] = -0.5
+            return values
+
+    result = add_xgboost_predictions(
+        NegativeModel(), consumption, baseline
+    )
+
+    assert (result["xgboost_pred_kwh"] >= 0).all()
+    assert (result["xgboost_pred_kwh"] == 0.0).sum() == 2

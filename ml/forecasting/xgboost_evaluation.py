@@ -51,6 +51,10 @@ def add_xgboost_predictions(
         if predictions.shape != (24,) or not np.isfinite(predictions).all():
             raise ValueError("Invalid XGBoost predictions")
 
+        # Consumption cannot be negative: floor model output at 0 kWh.
+        # Clip only after the finite check, so -inf is still rejected.
+        predictions = np.clip(predictions, 0.0, None)
+
         forecast_frames.append(pd.DataFrame({
             "timestamp": expected,
             "xgboost_pred_kwh": predictions,
