@@ -8,3 +8,7 @@ __pycache__/
 .venv/
 data/raw/
 data/lakehouse/
+# Personal sandbox Terraform values (never commit)
+sandbox.tfvars
+sandbox.backend.hcl
+*.tf.off
