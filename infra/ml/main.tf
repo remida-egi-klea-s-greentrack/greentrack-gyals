@@ -8,6 +8,7 @@ provider "aws" {
   default_tags {
     tags = {
       Project     = "greentrack"
+      Group       = "g2"
       Environment = var.environment
       ManagedBy   = "terraform"
     }
