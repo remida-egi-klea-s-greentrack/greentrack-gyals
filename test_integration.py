@@ -38,15 +38,17 @@ def test_ml_forecast():
     """Test that ML forecasting works."""
     print("\n🔍 Testing ML Forecast (Developer B integration)...")
     try:
-        from app.adapters.ml_forecast import generate_forecast
+        from app.adapters.ml_forecast import generate_forecast, get_forecast_metadata
         
-        result = generate_forecast(horizon_hours=24)
-        print(f"   ✅ Generated forecast with {len(result.get('predictions', []))} predictions")
-        print(f"   📊 Generated at: {result.get('generated_at')}")
-        print(f"   🔮 Model: {result.get('model_info', {}).get('model', 'unknown')}")
+        predictions = generate_forecast(horizon_hours=24)
+        metadata = get_forecast_metadata()
         
-        if result.get('predictions'):
-            sample = result['predictions'][0]
+        print(f"   ✅ Generated forecast with {len(predictions)} predictions")
+        print(f"   🔮 Model: {metadata.get('model', 'unknown')}")
+        print(f"   📊 Training samples: {metadata.get('training_samples', 0)}")
+        
+        if predictions:
+            sample = predictions[0]
             print(f"   📈 Sample: {sample['timestamp']} → {sample['predicted_kwh']} kWh")
             if 'lower_bound' in sample and 'upper_bound' in sample:
                 print(f"      Confidence: [{sample['lower_bound']}, {sample['upper_bound']}]")
