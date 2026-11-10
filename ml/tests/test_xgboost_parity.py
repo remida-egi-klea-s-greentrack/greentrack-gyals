@@ -10,6 +10,7 @@ import xgboost as xgb
 from botocore.stub import ANY, Stubber
 
 from ml.forecasting.features import FEATURE_COLUMNS
+from ml.sagemaker.aws_names import TAGS
 from ml.sagemaker.prepare_xgboost_data import HYPERPARAMETERS
 from ml.sagemaker.xgboost_parity import BoosterModel, train, training_job_request
 
@@ -25,6 +26,7 @@ def test_request_uses_csv_channel_and_frozen_hyperparameters():
     assert channel["DataSource"]["S3DataSource"]["S3Uri"] == "s3://my-bucket/xgboost/train/"
     assert request["OutputDataConfig"]["S3OutputPath"] == "s3://my-bucket/xgboost/models/"
     assert request["HyperParameters"] == HYPERPARAMETERS
+    assert request["Tags"] == TAGS
     assert request["StoppingCondition"]["MaxRuntimeInSeconds"] <= 3600
 
 

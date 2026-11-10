@@ -15,7 +15,6 @@ Usage:
 """
 
 import argparse
-import time
 
 import numpy as np
 import xgboost as xgb
@@ -26,6 +25,7 @@ from ml.forecasting.input_data import load_hourly_consumption
 from ml.forecasting.metrics import forecast_error_metrics
 from ml.forecasting.run_xgboost_validation import VALIDATION_END, VALIDATION_START
 from ml.forecasting.xgboost_evaluation import add_xgboost_predictions
+from ml.sagemaker.aws_names import TAGS, resource_name
 from ml.sagemaker.prepare_xgboost_data import HYPERPARAMETERS
 
 VALIDATION_RMSE_LOCAL = 0.6232
@@ -53,12 +53,13 @@ def training_job_request(job_name, bucket, role_arn, image_uri, instance_type="m
         # Hard stop so a stuck job cannot keep billing.
         "StoppingCondition": {"MaxRuntimeInSeconds": 1800},
         "HyperParameters": HYPERPARAMETERS,
+        "Tags": TAGS,
     }
 
 
 def train(sagemaker_client, bucket, role_arn, image_uri):
     """Start the training job, wait until it ends, and return its description."""
-    job_name = f"greentrack-xgboost-{time.strftime('%Y%m%d-%H%M%S')}"
+    job_name = resource_name("xgboost")
     sagemaker_client.create_training_job(**training_job_request(job_name, bucket, role_arn, image_uri))
     print(f"Started {job_name}; waiting (usually 3-5 minutes)...")
     sagemaker_client.get_waiter("training_job_completed_or_stopped").wait(TrainingJobName=job_name)
