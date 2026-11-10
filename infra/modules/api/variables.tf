@@ -8,3 +8,9 @@ variable "package_path" {
   type        = string
   default     = "../build/lambda.zip"
 }
+
+variable "dynamodb_table_arns" {
+  description = "Map of DynamoDB table ARNs (consumption, anomalies)"
+  type        = map(string)
+  default     = {}
+}

@@ -6,6 +6,7 @@ variable "name_prefix" {
 variable "tables" {
   description = "Tables to create, keyed by name"
   type = map(object({
-    hash_key = string
+    hash_key  = string
+    range_key = optional(string)
   }))
 }
