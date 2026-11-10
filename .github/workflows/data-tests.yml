@@ -1,0 +1,30 @@
+name: Data Tests
+
+on:
+  pull_request:
+    paths:
+      - "data/**"
+      - ".github/workflows/data-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "data/**"
+
+jobs:
+  test-data:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install data test dependencies
+        run: python -m pip install -r data/requirements-test.txt
+
+      - name: Run data tests
+        run: python -m pytest data/tests -v
