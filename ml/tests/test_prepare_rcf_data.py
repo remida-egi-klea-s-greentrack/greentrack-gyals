@@ -23,12 +23,12 @@ def series(start="2009-12-25 00:00", end="2010-01-05 23:00"):
     return pd.Series(values, index=hours)
 
 
-def test_shingle_holds_log_of_previous_24_hours_ending_at_t():
+def test_shingle_holds_kwh_of_previous_24_hours_ending_at_t():
     consumption = series()
     shingles = build_shingles(consumption)
 
     t = shingles.index[0]
-    expected = np.log(consumption.loc[t - pd.Timedelta(hours=SHINGLE_HOURS - 1):t].to_numpy())
+    expected = consumption.loc[t - pd.Timedelta(hours=SHINGLE_HOURS - 1):t].to_numpy()
     np.testing.assert_allclose(shingles.loc[t].to_numpy(), expected)
     assert list(shingles.columns) == [f"lag_{k}" for k in range(SHINGLE_HOURS - 1, -1, -1)]
 
