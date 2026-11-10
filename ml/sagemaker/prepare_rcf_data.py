@@ -1,7 +1,10 @@
-"""Write Random Cut Forest inputs: 24-hour shingles of log consumption, same split as log-MAD.
+"""Write Random Cut Forest inputs: 24-hour shingles of hourly consumption, same split as log-MAD.
 
-Each record describes one hour t by the log kWh of hours t-23 ... t, so RCF can flag an unusual
+Each record describes one hour t by the kWh of hours t-23 ... t, so RCF can flag an unusual
 hour in the context of the day before it. Records that include any missing hour are dropped.
+Raw kWh, not log: log shrinks spikes (x5 becomes +1.6) and stretches near-zero hours. With log
+inputs RCF caught 0/20 injected x5 spikes and no validation hour passed the 91.5th training
+percentile (10 Nov 2026 run).
 
 Variables:
     SHINGLE_HOURS      - window length per record (RCF feature_dim)
@@ -15,7 +18,6 @@ Usage:
 import argparse
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 from ml.forecasting.input_data import load_hourly_consumption
@@ -27,13 +29,12 @@ VALIDATION_END = "2010-05-31 23:00"
 
 
 def build_shingles(consumption: pd.Series, hours: int = SHINGLE_HOURS) -> pd.DataFrame:
-    """One row per hour t with columns lag_{hours-1} ... lag_0 holding log kWh; incomplete windows dropped.
+    """One row per hour t with columns lag_{hours-1} ... lag_0 holding kWh; incomplete windows dropped.
 
     load_hourly_consumption guarantees a gap-free hourly index (missing hours are NaN),
     so a positional shift of k rows is exactly k hours.
     """
-    log_kwh = np.log(consumption)
-    columns = {f"lag_{k}": log_kwh.shift(k) for k in range(hours - 1, -1, -1)}
+    columns = {f"lag_{k}": consumption.shift(k) for k in range(hours - 1, -1, -1)}
     return pd.DataFrame(columns).dropna()
 
 
