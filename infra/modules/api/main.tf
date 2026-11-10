@@ -5,7 +5,7 @@ locals {
     forecast    = { handler = "app.backend.forecast.handler", method = "GET", path = "/forecast" }
     chat        = { handler = "app.backend.chat.handler", method = "POST", path = "/chat" }
   }
-  
+
   # Extract table names from ARNs
   table_names = {
     for key, arn in var.dynamodb_table_arns :
@@ -39,7 +39,7 @@ data "aws_iam_policy_document" "dynamodb_access" {
   statement {
     sid    = "DynamoDBAccess"
     effect = "Allow"
-    
+
     actions = [
       "dynamodb:GetItem",
       "dynamodb:PutItem",
@@ -50,7 +50,7 @@ data "aws_iam_policy_document" "dynamodb_access" {
       "dynamodb:BatchGetItem",
       "dynamodb:BatchWriteItem"
     ]
-    
+
     resources = values(var.dynamodb_table_arns)
   }
 }
