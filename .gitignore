@@ -12,3 +12,4 @@ data/lakehouse/
 sandbox.tfvars
 sandbox.backend.hcl
 *.tf.off
+tfplan
