@@ -1,0 +1,9 @@
+# Backend configuration for Terraform state in S3
+# Copy this file to backend.hcl and update with your values
+# Run: terraform init -backend-config=backend.hcl
+
+bucket         = "YOUR_GROUP_PREFIX-greentrack-terraform-state"  # e.g., g2-greentrack-terraform-state
+key            = "greentrack/terraform.tfstate"
+region         = "eu-central-1"
+dynamodb_table = "YOUR_GROUP_PREFIX-greentrack-terraform-locks"  # e.g., g2-greentrack-terraform-locks
+encrypt        = true
