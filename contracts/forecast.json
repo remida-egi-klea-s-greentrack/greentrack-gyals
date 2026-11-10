@@ -6,7 +6,7 @@
   "response_fields": {
     "generated_at": "ISO 8601 string, when the forecast was made",
     "unit": "string, always kWh",
-    "predictions": "list of {timestamp, predicted_kwh, lower_bound, upper_bound}"
+    "predictions": "list of {timestamp, predicted_kwh, lower_bound, upper_bound}; timestamp identifies the start of each forecast hour; lower_bound and upper_bound are numeric, or null when prediction intervals are unavailable"
   },
   "example": {
     "generated_at": "2026-01-01T10:00:00",
