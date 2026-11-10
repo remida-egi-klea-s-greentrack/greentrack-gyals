@@ -24,7 +24,7 @@ module "frontend" {
 }
 
 module "api" {
-  source             = "./modules/api"
-  name_prefix        = local.name_prefix
+  source              = "./modules/api"
+  name_prefix         = local.name_prefix
   dynamodb_table_arns = module.dynamodb.table_arns
 }

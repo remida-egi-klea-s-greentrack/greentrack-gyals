@@ -11,7 +11,7 @@
 variable "group_prefix" {
   description = "Group prefix (g1, g2, g3, or g4)"
   type        = string
-  
+
   validation {
     condition     = can(regex("^g[1-4]$", var.group_prefix))
     error_message = "Group prefix must be g1, g2, g3, or g4."
@@ -44,10 +44,10 @@ resource "aws_s3_bucket" "terraform_state" {
   bucket = "${var.group_prefix}-greentrack-terraform-state"
 
   tags = {
-    Name        = "${var.group_prefix}-greentrack-terraform-state"
-    Purpose     = "Terraform State Storage"
-    Project     = "GreenTrack"
-    ManagedBy   = "Terraform Bootstrap"
+    Name      = "${var.group_prefix}-greentrack-terraform-state"
+    Purpose   = "Terraform State Storage"
+    Project   = "GreenTrack"
+    ManagedBy = "Terraform Bootstrap"
   }
 }
 
@@ -90,10 +90,10 @@ resource "aws_dynamodb_table" "terraform_locks" {
   }
 
   tags = {
-    Name        = "${var.group_prefix}-greentrack-terraform-locks"
-    Purpose     = "Terraform State Locking"
-    Project     = "GreenTrack"
-    ManagedBy   = "Terraform Bootstrap"
+    Name      = "${var.group_prefix}-greentrack-terraform-locks"
+    Purpose   = "Terraform State Locking"
+    Project   = "GreenTrack"
+    ManagedBy = "Terraform Bootstrap"
   }
 }
 
@@ -109,7 +109,7 @@ output "dynamodb_table_name" {
 
 output "backend_config" {
   description = "Backend configuration for main Terraform"
-  value = <<-EOT
+  value       = <<-EOT
     bucket         = "${aws_s3_bucket.terraform_state.id}"
     key            = "greentrack/terraform.tfstate"
     region         = "${var.aws_region}"
