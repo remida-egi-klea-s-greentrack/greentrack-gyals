@@ -11,8 +11,9 @@ import boto3
 import numpy as np
 import pandas as pd
 import pytest
-from botocore.stub import Stubber
+from botocore.stub import ANY, Stubber
 
+from ml.sagemaker.aws_names import TAGS
 from ml.sagemaker.rcf_compare import compare, endpoint_scorer, temporary_endpoint, to_severity
 
 ARN = "arn:aws:sagemaker:eu-north-1:123456789012:{}/x"
@@ -32,9 +33,13 @@ def test_endpoint_is_deleted_even_when_scoring_fails():
     client = boto3.client("sagemaker", region_name="eu-north-1",
                           aws_access_key_id="x", aws_secret_access_key="x")
     stubber = Stubber(client)
-    stubber.add_response("create_model", {"ModelArn": ARN.format("model")})
-    stubber.add_response("create_endpoint_config", {"EndpointConfigArn": ARN.format("endpoint-config")})
-    stubber.add_response("create_endpoint", {"EndpointArn": ARN.format("endpoint")})
+    # Every resource created in the shared account must carry the group tags.
+    stubber.add_response("create_model", {"ModelArn": ARN.format("model")},
+                         {"ModelName": "x", "PrimaryContainer": ANY, "ExecutionRoleArn": ROLE, "Tags": TAGS})
+    stubber.add_response("create_endpoint_config", {"EndpointConfigArn": ARN.format("endpoint-config")},
+                         {"EndpointConfigName": "x", "ProductionVariants": ANY, "Tags": TAGS})
+    stubber.add_response("create_endpoint", {"EndpointArn": ARN.format("endpoint")},
+                         {"EndpointName": "x", "EndpointConfigName": "x", "Tags": TAGS})
     stubber.add_response("describe_endpoint", {
         "EndpointName": "x", "EndpointArn": ARN.format("endpoint"), "EndpointConfigName": "x",
         "EndpointStatus": "InService", "CreationTime": "2026-01-01T00:00:00Z",

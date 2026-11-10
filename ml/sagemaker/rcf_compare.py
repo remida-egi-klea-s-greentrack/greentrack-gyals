@@ -18,7 +18,6 @@ Usage:
 
 import argparse
 import json
-import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -27,6 +26,7 @@ import pandas as pd
 
 from ml.anomaly.global_log_mad import GlobalLogMADDetector
 from ml.forecasting.input_data import load_hourly_consumption
+from ml.sagemaker.aws_names import TAGS, resource_name
 from ml.sagemaker.prepare_rcf_data import (
     SHINGLE_HOURS,
     TRAIN_END,
@@ -59,12 +59,13 @@ def training_job_request(job_name, bucket, role_arn, image_uri, instance_type="m
         "ResourceConfig": {"InstanceType": instance_type, "InstanceCount": 1, "VolumeSizeInGB": 5},
         "StoppingCondition": {"MaxRuntimeInSeconds": 1800},
         "HyperParameters": HYPERPARAMETERS,
+        "Tags": TAGS,
     }
 
 
 def train(sagemaker_client, bucket, role_arn, image_uri):
     """Start the RCF training job, wait until it ends, and return its description."""
-    job_name = f"greentrack-rcf-{time.strftime('%Y%m%d-%H%M%S')}"
+    job_name = resource_name("rcf")
     sagemaker_client.create_training_job(**training_job_request(job_name, bucket, role_arn, image_uri))
     print(f"Started {job_name}; waiting (usually 3-5 minutes)...")
     sagemaker_client.get_waiter("training_job_completed_or_stopped").wait(TrainingJobName=job_name)
@@ -79,6 +80,7 @@ def temporary_endpoint(sagemaker_client, name, image_uri, model_data, role_arn, 
             ModelName=name,
             PrimaryContainer={"Image": image_uri, "ModelDataUrl": model_data},
             ExecutionRoleArn=role_arn,
+            Tags=TAGS,
         )
         sagemaker_client.create_endpoint_config(
             EndpointConfigName=name,
@@ -88,8 +90,9 @@ def temporary_endpoint(sagemaker_client, name, image_uri, model_data, role_arn, 
                 "InstanceType": instance_type,
                 "InitialInstanceCount": 1,
             }],
+            Tags=TAGS,
         )
-        sagemaker_client.create_endpoint(EndpointName=name, EndpointConfigName=name)
+        sagemaker_client.create_endpoint(EndpointName=name, EndpointConfigName=name, Tags=TAGS)
         print(f"Creating endpoint {name}; waiting (usually 5-8 minutes)...")
         sagemaker_client.get_waiter("endpoint_in_service").wait(EndpointName=name)
         yield name
@@ -232,7 +235,7 @@ def main():
         return
 
     consumption = load_hourly_consumption(args.gold)
-    name = f"greentrack-rcf-{time.strftime('%Y%m%d-%H%M%S')}"
+    name = resource_name("rcf")
     with temporary_endpoint(sagemaker, name, args.image_uri, args.model_data, args.role_arn):
         summary, rcf = compare(consumption, endpoint_scorer(boto3.client("sagemaker-runtime"), name))
 
