@@ -32,10 +32,12 @@ class GoldLoaderTest(unittest.TestCase):
         
         records = load_hourly_consumption(limit=10)
         
-        self.assertEqual(len(records), 2)
-        self.assertIn("timestamp", records[0])
-        self.assertIn("global_active_power_kwh", records[0])
-        self.assertEqual(records[0]["complete"], True)
+        # Proper assertions
+        self.assertIsInstance(records, list, "Should return a list")
+        self.assertEqual(len(records), 2, "Should return 2 records")
+        self.assertIn("timestamp", records[0], "Record should have timestamp")
+        self.assertIn("global_active_power_kwh", records[0], "Record should have global_active_power_kwh")
+        self.assertTrue(records[0]["complete"], "Record should be marked as complete")
     
     @patch("app.adapters.gold_loader.pd.read_parquet")
     @patch("app.adapters.gold_loader.get_gold_exports_dir")
@@ -55,10 +57,13 @@ class GoldLoaderTest(unittest.TestCase):
         
         anomalies = detect_anomalies_simple(threshold_kwh=5.0)
         
-        self.assertEqual(len(anomalies), 1)
-        self.assertEqual(anomalies[0]["global_active_power_kwh"], 6.5)
-        self.assertIn("anomaly_score", anomalies[0])
-        self.assertIn("reason", anomalies[0])
+        # Proper assertions
+        self.assertIsInstance(anomalies, list, "Should return a list")
+        self.assertEqual(len(anomalies), 1, "Should find exactly 1 anomaly")
+        self.assertEqual(anomalies[0]["global_active_power_kwh"], 6.5, "Should detect the high consumption hour")
+        self.assertIn("anomaly_score", anomalies[0], "Anomaly should have a score")
+        self.assertIn("reason", anomalies[0], "Anomaly should have a reason")
+        self.assertGreater(anomalies[0]["anomaly_score"], 0, "Anomaly score should be positive")
 
 
 class MLForecastTest(unittest.TestCase):
@@ -76,10 +81,13 @@ class MLForecastTest(unittest.TestCase):
         
         predictions = generate_forecast(horizon_hours=24)
         
-        self.assertGreater(len(predictions), 0)
-        self.assertLessEqual(len(predictions), 24)
-        self.assertIn("timestamp", predictions[0])
-        self.assertIn("predicted_kwh", predictions[0])
+        # Proper assertions
+        self.assertIsInstance(predictions, list, "Should return a list")
+        self.assertGreater(len(predictions), 0, "Should have at least one prediction")
+        self.assertLessEqual(len(predictions), 24, "Should not exceed horizon")
+        self.assertIn("timestamp", predictions[0], "Prediction should have timestamp")
+        self.assertIn("predicted_kwh", predictions[0], "Prediction should have predicted_kwh")
+        self.assertIsInstance(predictions[0]["predicted_kwh"], (int, float), "predicted_kwh should be numeric")
     
     @patch("app.adapters.ml_forecast.get_consumption_series")
     def test_get_forecast_metadata_returns_model_info(self, mock_get_series):
@@ -92,10 +100,13 @@ class MLForecastTest(unittest.TestCase):
         
         metadata = get_forecast_metadata()
         
-        self.assertIn("model", metadata)
-        self.assertIn("model_version", metadata)
-        self.assertIn("training_samples", metadata)
-        self.assertEqual(metadata["training_samples"], 200)
+        # Proper assertions
+        self.assertIsInstance(metadata, dict, "Should return a dictionary")
+        self.assertIn("model", metadata, "Should include model name")
+        self.assertIn("model_version", metadata, "Should include model version")
+        self.assertIn("training_samples", metadata, "Should include training samples count")
+        self.assertEqual(metadata["training_samples"], 200, "Should have correct training sample count")
+        self.assertIsInstance(metadata["model"], str, "Model name should be a string")
 
 
 class HandlerIntegrationTest(unittest.TestCase):
@@ -113,9 +124,13 @@ class HandlerIntegrationTest(unittest.TestCase):
         
         result = handler({}, None)
         
-        self.assertEqual(result["statusCode"], 200)
+        # Proper assertions
+        self.assertIsInstance(result, dict, "Handler should return a dict")
+        self.assertEqual(result["statusCode"], 200, "Should return 200 status code")
+        self.assertIn("body", result, "Response should have body")
         body = eval(result["body"])  # Simple eval for test
-        self.assertIn("records", body)
+        self.assertIn("records", body, "Body should contain records")
+        self.assertIsInstance(body["records"], list, "Records should be a list")
     
     @patch("app.backend.forecast.default_loader")
     def test_forecast_handler_uses_ml_model(self, mock_loader):
@@ -131,10 +146,15 @@ class HandlerIntegrationTest(unittest.TestCase):
         
         result = handler({}, None)
         
-        self.assertEqual(result["statusCode"], 200)
+        # Proper assertions
+        self.assertIsInstance(result, dict, "Handler should return a dict")
+        self.assertEqual(result["statusCode"], 200, "Should return 200 status code")
+        self.assertIn("body", result, "Response should have body")
         body = eval(result["body"])
-        self.assertIn("predictions", body)
-        self.assertIn("model_info", body)
+        self.assertIn("predictions", body, "Body should contain predictions")
+        self.assertIn("model_info", body, "Body should contain model_info")
+        self.assertIsInstance(body["predictions"], list, "Predictions should be a list")
+        self.assertIsInstance(body["model_info"], dict, "Model info should be a dict")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,98 @@
+name: Terraform Apply
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'infra/**'
+      - '.github/workflows/terraform-apply.yml'
+  workflow_dispatch:  # Manual trigger
+
+# TODO: Add OIDC permissions when AWS access is configured
+# permissions:
+#   id-token: write
+#   contents: read
+
+jobs:
+  terraform-apply:
+    runs-on: ubuntu-latest
+    environment: production  # Requires approval in GitHub settings
+    defaults:
+      run:
+        working-directory: infra
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+
+      # TODO: Configure AWS credentials with OIDC
+      # - name: Configure AWS credentials
+      #   uses: aws-actions/configure-aws-credentials@v4
+      #   with:
+      #     role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+      #     aws-region: eu-central-1
+
+      # TODO: Build Lambda package
+      # - name: Set up Python
+      #   uses: actions/setup-python@v5
+      #   with:
+      #     python-version: '3.11'
+      #
+      # - name: Build Lambda package
+      #   run: |
+      #     cd ..
+      #     chmod +x scripts/build-lambda.sh
+      #     ./scripts/build-lambda.sh
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Init
+        run: |
+          # TODO: Add backend config when AWS access is available
+          # terraform init -backend-config=backend.hcl
+          terraform init -backend=false
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      # TODO: Enable when AWS backend is configured
+      # - name: Terraform Plan
+      #   run: terraform plan -var-file=terraform.tfvars -out=tfplan
+      #
+      # - name: Terraform Apply
+      #   run: terraform apply -auto-approve tfplan
+      #
+      # - name: Save Outputs
+      #   run: |
+      #     terraform output -json > outputs.json
+      #     echo "API_URL=$(terraform output -raw api_gateway_url)" >> $GITHUB_ENV
+      #     echo "FRONTEND_URL=$(terraform output -raw cloudfront_url)" >> $GITHUB_ENV
+      #
+      # - name: Deployment Summary
+      #   run: |
+      #     echo "✅ Infrastructure deployed successfully!"
+      #     echo ""
+      #     echo "📍 API Gateway: ${{ env.API_URL }}"
+      #     echo "🌐 Frontend: ${{ env.FRONTEND_URL }}"
+      #     echo ""
+      #     echo "Next: Deploy frontend to S3"
+
+      - name: Placeholder - AWS Configuration Needed
+        run: |
+          echo "⚠️  Terraform apply requires AWS credentials and approval"
+          echo "📋 Setup required:"
+          echo "  1. Configure OIDC with AWS"
+          echo "  2. Create 'production' environment in GitHub"
+          echo "  3. Add required secrets:"
+          echo "     - AWS_ROLE_ARN"
+          echo "  4. Create backend.hcl with state bucket"
+          echo "  5. Uncomment deployment steps in this workflow"
+          echo ""
+          echo "✅ Validation checks passed!"
