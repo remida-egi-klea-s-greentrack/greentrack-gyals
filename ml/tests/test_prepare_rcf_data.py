@@ -10,9 +10,14 @@ import pytest
 pytest.importorskip("pyarrow")
 
 from ml.sagemaker.prepare_rcf_data import (  # noqa: E402
+    CALIBRATION_END,
+    CALIBRATION_START,
+    FIT_END,
     SHINGLE_HOURS,
+    VALIDATION_END,
     VALIDATION_START,
     build_shingles,
+    split_shingles,
     write_rcf_inputs,
 )
 
@@ -45,8 +50,19 @@ def test_windows_touching_a_missing_hour_are_dropped():
     assert np.isfinite(shingles.to_numpy()).all()
 
 
-def test_split_and_files(tmp_path):
+def test_injected_hour_changes_exactly_the_windows_containing_it():
     consumption = series()
+    t = pd.Timestamp("2009-12-30 12:00")
+    modified = consumption.copy()
+    modified.loc[t] *= 5
+
+    changed = (build_shingles(modified) != build_shingles(consumption)).any(axis=1)
+    expected = pd.date_range(t, t + pd.Timedelta(hours=SHINGLE_HOURS - 1), freq="h")
+    assert changed[changed].index.equals(expected)
+
+
+def test_split_periods_and_files(tmp_path):
+    consumption = series("2008-12-20 00:00", "2010-06-10 23:00")
     gold = tmp_path / "gold.parquet"
     pd.DataFrame({
         "timestamp": consumption.index,
@@ -56,11 +72,23 @@ def test_split_and_files(tmp_path):
 
     counts = write_rcf_inputs(gold, tmp_path / "out")
 
-    train = pd.read_csv(tmp_path / "out" / "train.csv", header=None)
-    validation = pd.read_csv(tmp_path / "out" / "validation.csv", header=None)
-    index = pd.read_csv(tmp_path / "out" / "validation_index.csv", parse_dates=["timestamp"])
+    out = tmp_path / "out"
+    for name in ["train", "calibration", "validation"]:
+        frame = pd.read_csv(out / f"{name}.csv", header=None)
+        assert len(frame) == counts[name] and frame.shape[1] == SHINGLE_HOURS
+    assert not (out / "train_index.csv").exists()
 
-    assert len(train) == counts["train"] and len(validation) == counts["validation"]
-    assert train.shape[1] == SHINGLE_HOURS and validation.shape[1] == SHINGLE_HOURS
-    assert len(index) == len(validation)
-    assert index["timestamp"].min() == pd.Timestamp(VALIDATION_START)
+    calibration = pd.read_csv(out / "calibration_index.csv", parse_dates=["timestamp"])["timestamp"]
+    validation = pd.read_csv(out / "validation_index.csv", parse_dates=["timestamp"])["timestamp"]
+    assert calibration.min() == pd.Timestamp(CALIBRATION_START) and calibration.max() == pd.Timestamp(CALIBRATION_END)
+    assert validation.min() == pd.Timestamp(VALIDATION_START) and validation.max() == pd.Timestamp(VALIDATION_END)
+    assert counts["train"] == len(split_shingles(consumption)["train"].loc[:FIT_END])
+
+
+def test_split_never_reads_hours_after_validation():
+    consumption = series("2008-12-20 00:00", "2010-06-10 23:00")
+    changed = consumption.copy()
+    changed.loc["2010-06-01":] = 99.0
+
+    for name, frame in split_shingles(consumption).items():
+        pd.testing.assert_frame_equal(frame, split_shingles(changed)[name])

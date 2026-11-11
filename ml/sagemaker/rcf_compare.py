@@ -1,14 +1,28 @@
-"""Train SageMaker Random Cut Forest and compare it with the log-MAD baseline on the same hours.
+"""Train SageMaker Random Cut Forest and run the confirmation test against log-MAD.
 
 Two commands:
-    train    start an RCF training job on rcf/train/ in the ML bucket and wait for it
-    compare  deploy a temporary endpoint, score training + validation shingles, delete the endpoint,
-             then compare alerts and synthetic-injection detection with log-MAD
+    train    start an RCF training job on rcf/train/ (FIT period, data through 2008) and wait for it
+    compare  deploy a temporary endpoint, score calibration (2009) + validation (Jan-May 2010) shingles
+             and the injected test windows, delete the endpoint, then evaluate the confirmation rule
+
+Both detectors use the same scheme: fitted on FIT, thresholds from their own 2009 scores (out of
+sample), evaluated on validation. log-MAD here is fitted on FIT only for a like-for-like comparison;
+the production log-MAD detector is not changed. One SageMaker model is scored, so the 10 seeds vary
+the injection positions only.
+
+Confirmation rule (written before the SageMaker run, 11 Nov 2026), all must hold:
+    1. RCF validation alerts > 0 and <= 2 x log-MAD validation alerts
+    2. on busy-slot x3 spikes, RCF recall beats log-MAD in >= 7 of 10 seeds
+    3. RCF or log-MAD together catch more busy-slot x3 spikes than log-MAD alone
 
 Variables:
     HYPERPARAMETERS - RCF settings (feature_dim = shingle length; trees/samples at RCF defaults)
-    SEVERITY_LEVELS - training-percentile cut-offs, identical to log-MAD (0.99 / 0.995 / 0.999)
+    SEVERITY_LEVELS - calibration-percentile cut-offs, identical for both detectors (0.99 / 0.995 / 0.999)
     BATCH_SIZE      - records per InvokeEndpoint call (well under the 6 MB payload limit)
+    INJECTIONS      - injection type -> (hours, multiplier, load stratum of the first hour)
+    CONTEXT_HOURS   - fully observed, alert-free hours required before an injection (covers a 24 h window)
+    AFTER_HOURS     - alert-free hours required after an injection
+    N_SEEDS, N_PER_TYPE - injection draws: 10 seeds x 20 per type
 
 Usage:
     python -m ml.sagemaker.rcf_compare train --bucket B --role-arn R --image-uri I
@@ -28,16 +42,30 @@ from ml.anomaly.global_log_mad import GlobalLogMADDetector
 from ml.forecasting.input_data import load_hourly_consumption
 from ml.sagemaker.aws_names import TAGS, resource_name
 from ml.sagemaker.prepare_rcf_data import (
+    CALIBRATION_END,
+    CALIBRATION_START,
+    FIT_END,
     SHINGLE_HOURS,
-    TRAIN_END,
     VALIDATION_END,
     VALIDATION_START,
     build_shingles,
+    split_shingles,
 )
 
 HYPERPARAMETERS = {"feature_dim": str(SHINGLE_HOURS), "num_trees": "100", "num_samples_per_tree": "256"}
 SEVERITY_LEVELS = [(0.99, "low"), (0.995, "medium"), (0.999, "high")]
 BATCH_SIZE = 500
+INJECTIONS = {
+    "spike_low_x5": (1, 5.0, "low"),
+    "spike_high_x3": (1, 3.0, "high"),
+    "dip_high_x0.2": (1, 0.2, "high"),
+    "sustained_6h_x2": (6, 2.0, "any"),
+    "dropout_6h_x0.25": (6, 0.25, "high"),
+}
+CONTEXT_HOURS = 30
+AFTER_HOURS = 11
+N_SEEDS = 10
+N_PER_TYPE = 20
 
 
 def training_job_request(job_name, bucket, role_arn, image_uri, instance_type="ml.m5.large"):
@@ -127,9 +155,9 @@ def endpoint_scorer(runtime_client, endpoint_name, batch_size=BATCH_SIZE):
     return score
 
 
-def to_severity(scores, training_scores):
-    """Training-percentile of each score and its severity, using the same cut-offs as log-MAD."""
-    reference = np.sort(training_scores)
+def to_severity(scores, reference_scores):
+    """Percentile of each score within the reference (calibration) scores, and its severity."""
+    reference = np.sort(reference_scores)
     percentile = np.searchsorted(reference, scores, side="right") / len(reference)
     severity = np.full(len(scores), None, dtype=object)
     for cutoff, level in SEVERITY_LEVELS:
@@ -137,73 +165,136 @@ def to_severity(scores, training_scores):
     return percentile, severity
 
 
-def synthetic_times(mad_scores):
-    """The 40 hours log-MAD's synthetic evaluation modifies (seed 42; 20 x5 then 20 x0.2)."""
-    eligible = mad_scores.index[mad_scores["anomaly_score"].notna() & mad_scores["severity"].isna()]
-    rng = np.random.default_rng(42)
-    selected = pd.DatetimeIndex(np.sort(rng.choice(eligible.to_numpy(), size=40, replace=False)))
-    return selected[::2], selected[1::2]
+def is_alert(scores, reference_scores):
+    """True where a score reaches the lowest severity cut-off of the reference distribution."""
+    percentile, _ = to_severity(scores, reference_scores)
+    return percentile >= SEVERITY_LEVELS[0][0]
+
+
+def abs_robust_z(detector, consumption):
+    """|robust z| per observed hour from a fitted log-MAD detector (missing hours dropped)."""
+    return detector.score(consumption).set_index("timestamp")["robust_z"].abs().dropna()
+
+
+def candidate_starts(consumption, alert, hours, slots):
+    """Validation starts whose context + event + after hours are fully observed and alert-free.
+
+    consumption and alert share one gap-free hourly index; slots = allowed hour-of-week of the start.
+    """
+    bad = (consumption.isna() | alert).to_numpy()
+    cumulative = np.concatenate([[0], np.cumsum(bad)])
+    index = consumption.index
+    position = np.arange(len(index))
+    low = position - CONTEXT_HOURS
+    high = position + hours - 1 + AFTER_HOURS
+    inside = (low >= 0) & (high < len(index)) & (index >= pd.Timestamp(VALIDATION_START))
+    clean = np.zeros(len(index), dtype=bool)
+    clean[inside] = cumulative[high[inside] + 1] - cumulative[low[inside]] == 0
+    in_slots = np.isin(index.day_of_week * 24 + index.hour, list(slots))
+    return index[clean & in_slots]
 
 
 def compare(consumption, score):
-    """Score RCF and log-MAD on the same validation hours; return (summary dict, RCF scores frame).
+    """Run the confirmation test; return (summary dict, validation RCF scores, one row per injection).
 
     `score` maps an (n, feature_dim) array of shingles to n RCF scores (endpoint or fake in tests).
     """
-    shingles = build_shingles(consumption)
-    train_shingles = shingles.loc[:TRAIN_END]
-    validation_shingles = shingles.loc[VALIDATION_START:VALIDATION_END]
+    consumption = consumption.loc[:VALIDATION_END]
+    parts = split_shingles(consumption)
 
-    training_scores = score(train_shingles.to_numpy())
-    validation_scores = score(validation_shingles.to_numpy())
-    percentile, severity = to_severity(validation_scores, training_scores)
+    # RCF: thresholds from 2009 scores
+    rcf_reference = score(parts["calibration"].to_numpy())
+    validation_scores = score(parts["validation"].to_numpy())
+    percentile, severity = to_severity(validation_scores, rcf_reference)
     rcf = pd.DataFrame(
         {"score": validation_scores, "percentile": percentile, "severity": severity},
-        index=validation_shingles.index,
+        index=parts["validation"].index,
     )
 
-    detector = GlobalLogMADDetector().fit(consumption.loc[:TRAIN_END])
-    validation = consumption.loc[VALIDATION_START:VALIDATION_END]
-    mad = detector.score(validation).set_index("timestamp")
+    # log-MAD under the same scheme: fitted on FIT, thresholds from 2009 |z|
+    detector = GlobalLogMADDetector().fit(consumption.loc[:FIT_END])
+    mad_reference = abs_robust_z(detector, consumption.loc[CALIBRATION_START:CALIBRATION_END]).to_numpy()
+    scored = consumption.loc[CALIBRATION_START:VALIDATION_END]
+    mad_z = abs_robust_z(detector, scored)
 
-    # Compare only hours both methods can score (RCF drops hours within 24 h after a gap).
-    common = rcf.index.intersection(mad.index[mad["anomaly_score"].notna()])
-    rcf_alerts = set(common[rcf.loc[common, "severity"].notna()])
-    mad_alerts = set(common[mad.loc[common, "severity"].notna()])
+    # Baseline alerts over 2009 + validation (the context of early-January injections lies in 2009)
+    rcf_scores = np.concatenate([rcf_reference, validation_scores])
+    rcf_index = parts["calibration"].index.append(parts["validation"].index)
+    rcf_alert = pd.Series(is_alert(rcf_scores, rcf_reference), index=rcf_index).reindex(scored.index, fill_value=False)
+    mad_alert = pd.Series(is_alert(mad_z.to_numpy(), mad_reference), index=mad_z.index).reindex(scored.index, fill_value=False)
+    validation_hours = slice(VALIDATION_START, VALIDATION_END)
 
-    def counts(levels):
-        return {level: int((levels == level).sum()) for _, level in SEVERITY_LEVELS}
-
-    summary = {
-        "hours_compared": len(common),
-        "rcf_alerts": len(rcf_alerts),
-        "rcf_by_severity": counts(rcf.loc[common, "severity"]),
-        "log_mad_alerts": len(mad_alerts),
-        "log_mad_by_severity": counts(mad.loc[common, "severity"]),
-        "overlap": len(rcf_alerts & mad_alerts),
-        "test_period_evaluated": False,
-        "synthetic": {},
+    # Load strata: hour-of-week slots by typical kWh over FIT
+    typical = np.exp(detector.medians_)
+    strata = {
+        "low": typical.index[typical <= typical.quantile(1 / 3)],
+        "high": typical.index[typical >= typical.quantile(2 / 3)],
+        "any": typical.index,
     }
 
-    # Same 40 modified hours as ml/anomaly/run_synthetic.py; RCF scores the window ending at each.
-    high_times, low_times = synthetic_times(mad)
-    modified = consumption.copy()
-    modified.loc[high_times] *= 5.0
-    modified.loc[low_times] *= 0.2
-    modified_shingles = build_shingles(modified)
-    mad_after = detector.score(modified.loc[VALIDATION_START:VALIDATION_END]).set_index("timestamp")
+    pools = {}
+    for kind, (hours, _, stratum) in INJECTIONS.items():
+        pools[kind] = candidate_starts(scored, rcf_alert | mad_alert, hours, strata[stratum])
+        if len(pools[kind]) < N_PER_TYPE:
+            raise ValueError(f"Only {len(pools[kind])} clean starts for {kind}")
 
-    for name, times in [("high_x5", high_times), ("low_x0_2", low_times)]:
-        scoreable = times.intersection(modified_shingles.index)
-        _, rcf_severity = to_severity(score(modified_shingles.loc[scoreable].to_numpy()), training_scores)
-        summary["synthetic"][name] = {
-            "injected": len(times),
-            "rcf_scoreable": len(scoreable),
-            "rcf_detected": int(pd.notna(rcf_severity).sum()),
-            "log_mad_detected": int(mad_after.loc[times, "severity"].notna().sum()),
+    # Draw injections; collect every RCF window that ends during an injection for one batched scoring pass
+    cases, windows, owners = [], [], []
+    for seed in range(N_SEEDS):
+        rng = np.random.default_rng(seed)
+        for kind, (hours, multiplier, _) in INJECTIONS.items():
+            for start in pd.DatetimeIndex(np.sort(rng.choice(pools[kind].to_numpy(), size=N_PER_TYPE, replace=False))):
+                end = start + pd.Timedelta(hours=hours - 1)
+                local = consumption.loc[start - pd.Timedelta(hours=CONTEXT_HOURS):end].copy()
+                local.loc[start:end] *= multiplier
+                event_windows = build_shingles(local).loc[start:end].to_numpy()
+                windows.append(event_windows)
+                owners.extend([len(cases)] * len(event_windows))
+                mad_hit = is_alert(abs_robust_z(detector, local.loc[start:end]).to_numpy(), mad_reference).any()
+                cases.append({"seed": seed, "type": kind, "start": start, "log_mad": bool(mad_hit)})
+
+    injected_alert = is_alert(score(np.concatenate(windows)), rcf_reference)
+    rcf_hit = pd.Series(injected_alert).groupby(np.asarray(owners)).any()
+    injections = pd.DataFrame(cases)
+    injections["rcf"] = rcf_hit.reindex(injections.index, fill_value=False).to_numpy()
+    injections["either"] = injections["log_mad"] | injections["rcf"]
+
+    summary = summarise(injections, rcf_alert.loc[validation_hours], mad_alert.loc[validation_hours])
+    summary["validation_hours_scored"] = {"rcf": len(rcf), "log_mad": int(mad_z.loc[validation_hours].size)}
+    return summary, rcf, injections
+
+
+def summarise(injections, rcf_alert, mad_alert):
+    """Alert counts, recall per type (mean and per seed), paired differences and the confirmation rule."""
+    per_seed = injections.groupby(["type", "seed"])[["log_mad", "rcf", "either"]].mean() * 100
+    recall = {}
+    for kind in INJECTIONS:
+        rows = per_seed.loc[kind]
+        difference = rows["rcf"] - rows["log_mad"]
+        recall[kind] = {
+            **{name: round(float(rows[name].mean()), 1) for name in ["log_mad", "rcf", "either"]},
+            "rcf_minus_log_mad_per_seed": [round(float(value), 1) for value in difference],
+            "rcf_better_seeds": int((difference > 0).sum()),
+            "rcf_worse_seeds": int((difference < 0).sum()),
         }
 
-    return summary, rcf
+    alerts = {"rcf": int(rcf_alert.sum()), "log_mad": int(mad_alert.sum()), "either": int((rcf_alert | mad_alert).sum())}
+    busy = recall["spike_high_x3"]
+    rule = {
+        "1_alert_burden": 0 < alerts["rcf"] <= 2 * alerts["log_mad"],
+        "2_busy_spikes_seeds": busy["rcf_better_seeds"] >= 7,
+        "3_union_adds": busy["either"] > busy["log_mad"],
+    }
+    rule["passed"] = all(rule.values())
+    return {
+        "periods": {"fit_end": FIT_END, "calibration": [CALIBRATION_START, CALIBRATION_END],
+                    "validation": [VALIDATION_START, VALIDATION_END]},
+        "test_period_evaluated": False,
+        "validation_alerts": alerts,
+        "injections_per_type": N_SEEDS * N_PER_TYPE,
+        "recall_percent": recall,
+        "confirmation_rule": rule,
+    }
 
 
 def main():
@@ -237,10 +328,11 @@ def main():
     consumption = load_hourly_consumption(args.gold)
     name = resource_name("rcf")
     with temporary_endpoint(sagemaker, name, args.image_uri, args.model_data, args.role_arn):
-        summary, rcf = compare(consumption, endpoint_scorer(boto3.client("sagemaker-runtime"), name))
+        summary, rcf, injections = compare(consumption, endpoint_scorer(boto3.client("sagemaker-runtime"), name))
 
     args.output.mkdir(parents=True, exist_ok=True)
     rcf.to_csv(args.output / "rcf_validation_scores.csv", index_label="timestamp")
+    injections.to_csv(args.output / "injections.csv", index=False)
     (args.output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps(summary, indent=2))
 
