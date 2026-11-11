@@ -1,13 +1,15 @@
 """DATA-02: Clean bronze data and write the silver Iceberg table."""
+import argparse
 from pathlib import Path
 
 from pyspark.sql import SparkSession, Window
 from pyspark.sql import functions as F
 
-REPO = Path(__file__).resolve().parents[2]
+_HERE = Path(__file__).resolve()
+# On Glue the script runs from a temporary folder, so fall back to the current one.
+REPO = _HERE.parents[2] if len(_HERE.parents) > 2 else Path.cwd()
 BRONZE_PATH = f"file://{REPO}/data/lakehouse/bronze/household_power"
 WAREHOUSE = f"file://{REPO}/data/lakehouse/warehouse"
-SILVER_TABLE = "local.silver.household_power"
 
 # Original column name -> clean snake_case name
 NUMERIC_COLUMNS = {
@@ -21,17 +23,38 @@ NUMERIC_COLUMNS = {
 }
 
 
-def build_spark() -> SparkSession:
-    return (
+def parse_args():
+    """Settings. With no arguments it runs locally; the Glue job passes S3 paths and catalog names."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--catalog", choices=["local", "glue"], default="local")
+    parser.add_argument("--bronze_path", default=BRONZE_PATH)
+    parser.add_argument("--warehouse", default=WAREHOUSE)
+    parser.add_argument("--silver_db", default="silver")
+    args, _unknown = parser.parse_known_args()  # Glue also passes its own arguments
+    return args
+
+
+def build_spark(args) -> SparkSession:
+    """Spark with Iceberg. The catalog alias is "local" in both environments:
+    locally its tables are folders in the warehouse; on AWS they are registered
+    in the Glue Data Catalog and stored in S3."""
+    builder = (
         SparkSession.builder.appName("greentrack-silver")
         .config("spark.sql.extensions",
                 "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
         .config("spark.sql.catalog.local", "org.apache.iceberg.spark.SparkCatalog")
-        .config("spark.sql.catalog.local.type", "hadoop")
-        .config("spark.sql.catalog.local.warehouse", WAREHOUSE)
+        .config("spark.sql.catalog.local.warehouse", args.warehouse)
         .config("spark.sql.session.timeZone", "UTC")
-        .getOrCreate()
     )
+    if args.catalog == "glue":
+        builder = (
+            builder.config("spark.sql.catalog.local.catalog-impl",
+                           "org.apache.iceberg.aws.glue.GlueCatalog")
+            .config("spark.sql.catalog.local.io-impl", "org.apache.iceberg.aws.s3.S3FileIO")
+        )
+    else:
+        builder = builder.config("spark.sql.catalog.local.type", "hadoop")
+    return builder.getOrCreate()
 
 
 def clean(bronze):
@@ -79,18 +102,20 @@ def clean(bronze):
 
 
 def main():
-    spark = build_spark()
+    args = parse_args()
+    spark = build_spark(args)
+    silver_table = f"local.{args.silver_db}.household_power"
     spark.sparkContext.setLogLevel("WARN")
 
-    bronze = spark.read.parquet(BRONZE_PATH)
+    bronze = spark.read.parquet(args.bronze_path)
     bronze_rows = bronze.count()
 
     silver = clean(bronze).cache()
     silver_rows = silver.count()
 
     # 5. Write the Iceberg table, partitioned by year and month
-    spark.sql("CREATE NAMESPACE IF NOT EXISTS local.silver")
-    silver.writeTo(SILVER_TABLE).partitionedBy(F.col("year"), F.col("month")).createOrReplace()
+    spark.sql(f"CREATE NAMESPACE IF NOT EXISTS local.{args.silver_db}")
+    silver.writeTo(silver_table).partitionedBy(F.col("year"), F.col("month")).createOrReplace()
 
     # Short quality report
     print("\n===== SILVER REPORT =====")
@@ -100,8 +125,8 @@ def main():
     for name in NUMERIC_COLUMNS.values():
         nulls = silver.filter(F.col(name).isNull()).count()
         print(f"Nulls in {name:<22} {nulls:,}")
-    print(f"Iceberg table rows:       {spark.table(SILVER_TABLE).count():,}")
-    spark.table(SILVER_TABLE).orderBy("timestamp").show(5, truncate=False)
+    print(f"Iceberg table rows:       {spark.table(silver_table).count():,}")
+    spark.table(silver_table).orderBy("timestamp").show(5, truncate=False)
 
     spark.stop()
 
