@@ -2,14 +2,18 @@ from app.backend.common import response
 
 
 def default_loader():
-    """Detect anomalies from gold layer or fallback to fixtures."""
+    """Detect anomalies using Developer B's ML model (log-MAD)."""
     try:
-        from app.adapters.gold_loader import detect_anomalies_simple
-        anomalies = detect_anomalies_simple(threshold_kwh=5.0)
-        return {"anomalies": anomalies}
+        from app.adapters.ml_anomaly import detect_anomalies
+        return detect_anomalies()
+    except FileNotFoundError as e:
+        print(f"⚠️  ML anomaly data not found: {e}")
+        print("📦 Falling back to fixtures/anomalies.json...")
+        from app.backend.common import load_fixture
+        return load_fixture("anomalies.json")
     except Exception as e:
         print(f"⚠️  Failed to detect anomalies: {e}")
-        print("📦 Falling back to fixtures...")
+        print("📦 Falling back to fixtures/anomalies.json...")
         from app.backend.common import load_fixture
         return load_fixture("anomalies.json")
 
@@ -19,5 +23,5 @@ def handler(event, context, loader=None):
     if loader is None:
         loader = default_loader
     
-    data = loader() if callable(loader) else loader("anomalies.json")
+    data = loader() if callable(loader) else loader
     return response(200, data)
