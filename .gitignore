@@ -8,3 +8,6 @@ __pycache__/
 .venv/
 data/raw/
 data/lakehouse/
+# Per-account Terraform settings for the data stack (never commit)
+infra/data/datamax.tfvars
+infra/data/datamax.backend.hcl
