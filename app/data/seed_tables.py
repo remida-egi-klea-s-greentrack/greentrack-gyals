@@ -1,6 +1,7 @@
 """Script për mbushjen e tabelave me të dhëna fillestare."""
 import json
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 # Shto root në Python path
@@ -13,7 +14,8 @@ def load_fixture(filename: str):
     """Ngarkon një fixture file."""
     fixture_path = Path(__file__).parent.parent.parent / "fixtures" / filename
     with open(fixture_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        # DynamoDB (boto3) nuk pranon float; numrat dhjetorë lexohen si Decimal.
+        return json.load(f, parse_float=Decimal)
 
 
 def seed_consumption_data():
