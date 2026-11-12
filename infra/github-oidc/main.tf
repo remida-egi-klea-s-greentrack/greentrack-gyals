@@ -16,7 +16,7 @@ data "aws_iam_openid_connect_provider" "github" {
 locals {
   account_id = data.aws_caller_identity.current.account_id
   region     = var.aws_region
-  repo       = "repo:${var.github_repository}"
+  subs       = var.github_sub_prefixes
 
   fn_arns = [for p in var.managed_prefixes : "arn:aws:lambda:${local.region}:${local.account_id}:function:${p}-*"]
   table_arns = flatten([for p in var.managed_prefixes : [
@@ -50,7 +50,7 @@ data "aws_iam_policy_document" "trust_plan" {
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["${local.repo}:pull_request", "${local.repo}:ref:refs/heads/*"]
+      values   = flatten([for s in local.subs : ["${s}:pull_request", "${s}:ref:refs/heads/*"]])
     }
   }
 }
@@ -71,11 +71,11 @@ data "aws_iam_policy_document" "trust_deploy" {
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values = [
-        "${local.repo}:environment:production",
-        "${local.repo}:environment:e2e",
-        "${local.repo}:ref:refs/heads/main",
-      ]
+      values = flatten([for s in local.subs : [
+        "${s}:environment:production",
+        "${s}:environment:e2e",
+        "${s}:ref:refs/heads/main",
+      ]])
     }
   }
 }
