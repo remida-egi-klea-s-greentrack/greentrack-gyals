@@ -22,15 +22,12 @@ POLL_SECONDS = 0.5
 BATCH_SIZE = 500
 
 
-def query_hours(athena, database, workgroup, start, end, timeout_seconds=60, sleep=time.sleep):
-    """{hour: kWh or None} for [start, end); incomplete hours map to None.
+def run_query(athena, sql, workgroup, timeout_seconds=60, sleep=time.sleep):
+    """Rows of a read-only Athena query as lists of strings (None for NULL), header row removed.
 
-    start/end are validated datetimes, so formatting them into the SQL cannot inject anything.
     The query is cancelled if it does not finish within timeout_seconds.
     """
-    query_id = athena.start_query_execution(
-        QueryString=QUERY.format(database=database, start=start, end=end), WorkGroup=workgroup,
-    )["QueryExecutionId"]
+    query_id = athena.start_query_execution(QueryString=sql, WorkGroup=workgroup)["QueryExecutionId"]
 
     waited = 0.0
     while True:
@@ -45,18 +42,28 @@ def query_hours(athena, database, workgroup, start, end, timeout_seconds=60, sle
         sleep(POLL_SECONDS)
         waited += POLL_SECONDS
 
-    hours, token, first_page = {}, None, True
+    rows, token, first_page = [], None, True
     while True:
         page = athena.get_query_results(QueryExecutionId=query_id, **({"NextToken": token} if token else {}))
-        rows = page["ResultSet"]["Rows"]
-        for row in rows[1:] if first_page else rows:  # first row of the first page is the header
-            stamp, kwh, complete = (cell.get("VarCharValue") for cell in row["Data"])
-            hour = datetime.fromisoformat(stamp[:19])
-            hours[hour] = float(kwh) if complete == "true" and kwh is not None else None
+        page_rows = page["ResultSet"]["Rows"]
+        for row in page_rows[1:] if first_page else page_rows:  # first row of the first page is the header
+            rows.append([cell.get("VarCharValue") for cell in row["Data"]])
         first_page = False
         token = page.get("NextToken")
         if not token:
-            return hours
+            return rows
+
+
+def query_hours(athena, database, workgroup, start, end, timeout_seconds=60, sleep=time.sleep):
+    """{hour: kWh or None} for [start, end); incomplete hours map to None.
+
+    start/end are validated datetimes, so formatting them into the SQL cannot inject anything.
+    """
+    sql = QUERY.format(database=database, start=start, end=end)
+    hours = {}
+    for stamp, kwh, complete in run_query(athena, sql, workgroup, timeout_seconds, sleep):
+        hours[datetime.fromisoformat(stamp[:19])] = float(kwh) if complete == "true" and kwh is not None else None
+    return hours
 
 
 def _csv(rows):
