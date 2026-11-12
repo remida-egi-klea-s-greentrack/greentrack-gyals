@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   basic-check:
     runs-on: ubuntu-latest
@@ -22,23 +25,74 @@ jobs:
           test -d infra
           echo "Structure OK"
 
-  terraform-validate:
+  app-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: app/requirements-test.txt
+
+      - name: Install test dependencies
+        run: python -m pip install -r app/requirements-test.txt
+
+      - name: Run app tests (handlers, gold loader, DynamoDB readers)
+        env:
+          AWS_EC2_METADATA_DISABLED: "true"
+          AWS_DEFAULT_REGION: eu-central-1
+        run: python -m pytest app/tests -q
+
+      - name: Local server smoke test (fixtures, no AWS)
+        env:
+          AWS_EC2_METADATA_DISABLED: "true"
+          AWS_DEFAULT_REGION: eu-central-1
+        run: |
+          python -m app.backend.server &
+          for i in $(seq 1 20); do curl -sf localhost:8080/consumption >/dev/null && break; sleep 1; done
+          python scripts/smoke_test.py --api-url http://localhost:8080 --chat
+
+  frontend-build:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: infra
+        working-directory: app/frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: app/frontend/package-lock.json
+
+      - run: npm ci
+      - run: npm run build
+
+  terraform-validate:
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.6
 
       - name: Terraform format check
-        run: terraform fmt -check -recursive
+        run: terraform fmt -check -recursive infra
 
-      - name: Terraform init
-        run: terraform init -backend=false
+      - name: Validate app stack
+        working-directory: infra
+        run: |
+          terraform init -backend=false
+          terraform validate
 
-      - name: Terraform validate
-        run: terraform validate
+      - name: Validate github-oidc stack
+        working-directory: infra/github-oidc
+        run: |
+          terraform init -backend=false
+          terraform validate

@@ -58,7 +58,7 @@ def load_csv_rows(table_name: str) -> List[Dict[str, str]]:
         text = _read_csv_text_from_s3(table_name)
         source = "S3"
     except Exception as s3_err:
-        print(f"⚠️  S3 load failed for {table_name}: {s3_err}")
+        print(f"WARN S3 load failed for {table_name}: {s3_err}")
         text = _read_csv_text_local(table_name)
         source = "local"
     rows = list(csv.DictReader(io.StringIO(text)))
@@ -126,7 +126,7 @@ def detect_anomalies_simple(threshold_kwh: float = 5.0) -> List[Dict[str, Any]]:
     try:
         records = [_hourly_record(r) for r in load_csv_rows("gold_hourly_consumption")]
     except Exception as e:
-        print(f"⚠️  Could not load gold data for anomalies: {e}")
+        print(f"WARN could not load gold data for anomalies: {e}")
         return []
 
     high = [

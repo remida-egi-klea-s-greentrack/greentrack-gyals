@@ -58,7 +58,16 @@ greentrack-gyals/
 - AWS CLI v2
 - Terraform 1.5+
 
-### Local Development
+### Local Demo (one command)
+
+```bash
+docker compose up
+# Frontend → http://localhost:5173   API → http://localhost:8080   DynamoDB Local → http://localhost:8000
+```
+
+No AWS credentials needed: the API falls back to local gold CSV exports (if present) or `fixtures/`.
+
+### Local Development (without Docker)
 
 #### 1. Backend
 ```bash
@@ -76,8 +85,8 @@ python -m app.backend.server
 cd app/frontend
 npm install
 
-# Run dev server
-npm run dev
+# Run dev server (VITE_API_URL defaults to the production API if unset)
+VITE_API_URL=http://localhost:8080 npm run dev
 # → http://localhost:5173
 ```
 
@@ -101,32 +110,29 @@ curl -X POST http://localhost:8080/chat \
 ## ☁️ AWS Deployment
 
 ### Deploy Everything
+
+Normally this is done by GitHub Actions on merge to `main` (see **CI/CD**). Manually:
+
 ```powershell
-# 1. Set AWS credentials
-aws sso login
+# 1. AWS credentials (SSO access keys in ~/.aws/credentials)
+aws sts get-caller-identity
 
-# 2. Deploy infrastructure
+# 2. Build the Lambda package (Terraform deploys infra/build/lambda.zip)
+python infra/build/create_lambda_zip.py
+
+# 3. Deploy infrastructure + Lambda code (quote -backend-config / -var-file in PowerShell)
 cd infra
-terraform init -backend-config=backend.hcl
-terraform apply
-
-# 3. Build and deploy Lambda
-cd build
-python create_lambda_zip.py
-cd ..
-.\update-lambdas-s3.ps1
-
-# 4. Build and deploy frontend
-cd ..\app\frontend
-npm run build
-cd ..\..\infra
-.\deploy-frontend.ps1
+terraform init "-backend-config=backend.hcl"
+terraform plan "-var-file=terraform.tfvars" "-out=tfplan"
+terraform apply tfplan
 ```
 
+> Do not use `update-lambdas*.ps1`: they upload code outside Terraform and the next apply
+> will not notice. Terraform is the only deploy path for Lambda code.
+
 ### Test Production
-```powershell
-cd infra
-.\test-api.ps1
+```bash
+python scripts/smoke_test.py --api-url https://5tto05ko0e.execute-api.eu-central-1.amazonaws.com --chat
 ```
 
 ### View Logs
@@ -278,14 +284,18 @@ terraform import <resource_type>.<name> <resource_id>
 
 ## 📝 CI/CD
 
-GitHub Actions workflows:
-- **`ci.yml`** - Validation on PR/push
-- **`deploy-frontend.yml`** - Frontend deployment
-- **`terraform-apply.yml`** - Infrastructure deployment
-- **`data-tests.yml`** - Data pipeline tests
-- **`ml-tests.yml`** - ML model tests
+GitHub Actions authenticates to AWS with **OIDC** (no access keys in GitHub). Roles are defined in
+[`infra/github-oidc/`](infra/github-oidc/) (separate Terraform state):
+`g2-greentrack-github-plan` (read-only, PRs) and `g2-greentrack-github-deploy` (main / environments `production`, `e2e`).
 
-**Note:** AWS deployment steps require OIDC configuration (see workflow files for instructions).
+| Workflow | Trigger | What it does |
+|---|---|---|
+| `ci.yml` | PR, push to main | App tests (pytest), local server smoke test, frontend build, `terraform fmt`/`validate` |
+| `terraform-plan.yml` | PR touching infra/app | `terraform plan` of production (read-only role, no lock), summary in job |
+| `terraform-apply.yml` | push to main (infra/app) | Build Lambda zip → plan → **refuses destroy/replace** → apply → end-to-end smoke test |
+| `deploy-frontend.yml` | push to main (app/frontend) | Build with `VITE_API_URL` from Terraform output → S3 sync → CloudFront invalidation |
+| `e2e-ephemeral.yml` | manual | Deploys a separate `e2e` stack, smoke test + frontend check, **destroy**, verifies cleanup |
+| `data-tests.yml`, `ml-tests.yml`, `genai-tests.yml` | PR | Tests of the other teams |
 
 ## 🚦 Status
 

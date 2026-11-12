@@ -10,8 +10,7 @@ def default_loader(name="consumption.json"):
             raise ValueError("gold export returned no complete hours")
         return {"unit": "kWh", "records": records}
     except Exception as e:
-        print(f"⚠️  Failed to load gold data: {e}")
-        print("📦 Falling back to fixtures...")
+        print(f"WARN failed to load gold data: {e}; falling back to fixtures")
         from app.backend.common import load_fixture
         return load_fixture(name)
 

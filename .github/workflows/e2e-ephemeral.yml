@@ -1,0 +1,133 @@
+name: E2E Ephemeral Deploy + Cleanup
+
+# APP-08: deploy i plotë në një mjedis të përkohshëm "e2e" (state i veçantë), smoke test,
+# pastaj terraform destroy dhe verifikim që burimet u fshinë. Production nuk preket.
+# Vetëm manual (CloudFront create/destroy zgjat ~15-30 min).
+
+on:
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: "Mos e fshi stack-un në fund (për debug)"
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: terraform-e2e
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-central-1
+  DEPLOY_ROLE_ARN: arn:aws:iam::886565871385:role/g2-greentrack-github-deploy
+  TF_VAR_environment: e2e
+  TF_VAR_default_tags: '{"Project":"GreenTrack","ManagedBy":"Terraform","Environment":"e2e","Team":"Group2"}'
+  PREFIX: g2-greentrack-e2e
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    environment: e2e
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: app/frontend/package-lock.json
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.6
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-duration-seconds: 3600
+
+      - name: Build Lambda package
+        run: python infra/build/create_lambda_zip.py
+
+      - name: Terraform init (e2e state)
+        working-directory: infra
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=g2-greentrack-tfstate-886565871385" \
+            -backend-config="key=greentrack/e2e.tfstate" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+
+      - name: Deploy e2e stack
+        working-directory: infra
+        run: terraform apply -input=false -no-color -auto-approve
+
+      - name: Read outputs
+        id: tf
+        working-directory: infra
+        run: |
+          echo "api_url=$(terraform output -raw api_gateway_url)" >> "$GITHUB_OUTPUT"
+          echo "bucket=$(terraform output -raw frontend_bucket_name)" >> "$GITHUB_OUTPUT"
+          echo "url=$(terraform output -raw cloudfront_url)" >> "$GITHUB_OUTPUT"
+
+      - name: API smoke test (incl. /chat)
+        run: python scripts/smoke_test.py --api-url "${{ steps.tf.outputs.api_url }}" --chat
+
+      - name: Deploy frontend and check it is served
+        env:
+          VITE_API_URL: ${{ steps.tf.outputs.api_url }}
+        run: |
+          (cd app/frontend && npm ci && npm run build)
+          aws s3 sync app/frontend/dist/ "s3://${{ steps.tf.outputs.bucket }}/" --delete
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "${{ steps.tf.outputs.url }}")
+            [ "$code" = "200" ] && echo "Frontend OK" && exit 0
+            sleep 20
+          done
+          echo "::error::Frontend did not return 200"; exit 1
+
+      - name: Empty frontend bucket (needed before destroy)
+        if: always() && !inputs.keep
+        run: aws s3 rm "s3://${{ steps.tf.outputs.bucket }}/" --recursive || true
+
+      - name: Destroy e2e stack
+        if: always() && !inputs.keep
+        working-directory: infra
+        run: terraform destroy -input=false -no-color -auto-approve
+
+      - name: Cleanup test - verify nothing is left
+        if: always() && !inputs.keep
+        run: |
+          fail=0
+          for fn in consumption forecast anomalies; do
+            if aws lambda get-function --function-name "${PREFIX}-${fn}" >/dev/null 2>&1; then
+              echo "::error::Lambda ${PREFIX}-${fn} still exists"; fail=1
+            fi
+          done
+          for t in consumption forecasts anomalies; do
+            if aws dynamodb describe-table --table-name "${PREFIX}-${t}" >/dev/null 2>&1; then
+              echo "::error::Table ${PREFIX}-${t} still exists"; fail=1
+            fi
+          done
+          if [ -n "${{ steps.tf.outputs.bucket }}" ] && aws s3api head-bucket --bucket "${{ steps.tf.outputs.bucket }}" 2>/dev/null; then
+            echo "::error::Bucket still exists"; fail=1
+          fi
+          left=$(cd infra && terraform state list | wc -l)
+          [ "$left" -eq 0 ] || { echo "::error::$left resources left in e2e state"; fail=1; }
+          [ $fail -eq 0 ] && echo "Cleanup verified: e2e stack fully removed"
+          exit $fail

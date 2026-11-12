@@ -1,103 +1,93 @@
 name: Deploy Frontend
 
-# DISABLED: This workflow is in draft mode and requires AWS access
-# To enable: Remove the 'if: false' condition and configure AWS credentials
+# Build i React me URL-në e API-së nga Terraform, upload në S3 dhe invalidim i CloudFront.
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
-      - 'app/frontend/**'
-      - '.github/workflows/deploy-frontend.yml'
-  workflow_dispatch:  # Manual trigger
+      - "app/frontend/**"
+      - ".github/workflows/deploy-frontend.yml"
+  workflow_dispatch:
 
-# TODO: Add OIDC permissions when AWS access is configured
-# permissions:
-#   id-token: write
-#   contents: read
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: frontend-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-central-1
+  DEPLOY_ROLE_ARN: arn:aws:iam::886565871385:role/g2-greentrack-github-deploy
 
 jobs:
-  deploy-frontend:
+  deploy:
     runs-on: ubuntu-latest
-    if: false  # DISABLED - Remove this line when AWS is configured
-    environment: production  # Requires approval
-    
+    environment: production
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: hashicorp/setup-terraform@v3
         with:
-          node-version: '18'
-          cache: 'npm'
+          terraform_version: 1.16.6
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Read Terraform outputs
+        id: tf
+        working-directory: infra
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=g2-greentrack-tfstate-886565871385" \
+            -backend-config="key=greentrack/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true" >/dev/null
+          echo "api_url=$(terraform output -raw api_gateway_url)" >> "$GITHUB_OUTPUT"
+          echo "bucket=$(terraform output -raw frontend_bucket_name)" >> "$GITHUB_OUTPUT"
+          echo "distribution=$(terraform output -raw cloudfront_distribution_id)" >> "$GITHUB_OUTPUT"
+          echo "url=$(terraform output -raw cloudfront_url)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
           cache-dependency-path: app/frontend/package-lock.json
 
-      - name: Install dependencies
+      - name: Build
         working-directory: app/frontend
-        run: npm ci
-
-      - name: Build frontend
-        working-directory: app/frontend
-        run: npm run build
         env:
-          # TODO: Set API URL from Terraform output
-          # VITE_API_URL: ${{ secrets.API_GATEWAY_URL }}
-          VITE_API_URL: 'http://localhost:8080'
-
-      - name: Run frontend tests
-        working-directory: app/frontend
-        run: npm test --if-present
-        continue-on-error: true
-
-      # TODO: Configure AWS credentials with OIDC
-      # - name: Configure AWS credentials
-      #   uses: aws-actions/configure-aws-credentials@v4
-      #   with:
-      #     role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-      #     aws-region: eu-central-1
-
-      # TODO: Deploy to S3
-      # - name: Deploy to S3
-      #   run: |
-      #     aws s3 sync app/frontend/dist/ s3://${{ secrets.FRONTEND_BUCKET }}/ --delete
-      #     echo "✅ Frontend uploaded to S3"
-      #
-      # - name: Invalidate CloudFront cache
-      #   run: |
-      #     aws cloudfront create-invalidation \
-      #       --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
-      #       --paths "/*"
-      #     echo "✅ CloudFront cache invalidated"
-      #
-      # - name: Deployment Summary
-      #   run: |
-      #     echo "✅ Frontend deployed successfully!"
-      #     echo ""
-      #     echo "🌐 URL: https://${{ secrets.CLOUDFRONT_DOMAIN }}"
-      #     echo "📦 Bucket: ${{ secrets.FRONTEND_BUCKET }}"
-      #     echo ""
-      #     echo "Cache invalidation may take 5-10 minutes to propagate."
-
-      - name: Placeholder - AWS Configuration Needed
+          VITE_API_URL: ${{ steps.tf.outputs.api_url }}
         run: |
-          echo "⚠️  Frontend deployment requires AWS credentials"
-          echo "📋 Setup required:"
-          echo "  1. Configure OIDC with AWS"
-          echo "  2. Add required secrets:"
-          echo "     - AWS_ROLE_ARN"
-          echo "     - FRONTEND_BUCKET (from Terraform output)"
-          echo "     - CLOUDFRONT_DISTRIBUTION_ID (from Terraform output)"
-          echo "     - CLOUDFRONT_DOMAIN (from Terraform output)"
-          echo "     - API_GATEWAY_URL (for VITE_API_URL)"
-          echo "  3. Uncomment deployment steps in this workflow"
-          echo ""
-          echo "✅ Build succeeded! Output in app/frontend/dist/"
+          npm ci
+          npm run build
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-build
-          path: app/frontend/dist/
-          retention-days: 7
+      - name: Upload to S3
+        run: |
+          # assets/ kanë hash në emër -> cache i gjatë; index.html pa cache
+          aws s3 sync app/frontend/dist/ "s3://${{ steps.tf.outputs.bucket }}/" --delete \
+            --exclude index.html --cache-control "public,max-age=31536000,immutable"
+          aws s3 cp app/frontend/dist/index.html "s3://${{ steps.tf.outputs.bucket }}/index.html" \
+            --cache-control "no-cache"
+
+      - name: Invalidate CloudFront
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ steps.tf.outputs.distribution }}" --paths "/*" \
+            --query "Invalidation.Id" --output text
+
+      - name: Check site responds
+        run: |
+          for i in $(seq 1 10); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "${{ steps.tf.outputs.url }}")
+            [ "$code" = "200" ] && echo "Site OK: ${{ steps.tf.outputs.url }}" && exit 0
+            sleep 10
+          done
+          echo "::error::Site did not return 200"; exit 1
