@@ -3,7 +3,7 @@
 Events:
     {"message": "...", "session_id": "..."}      -> {"answer", "citations", "tools_used"} (contracts/chat.json)
     {"report": "weekly", "week_start": "YYYY-MM-DD"} -> {"report", "citations", "tools_used"}
-    An API Gateway proxy event with the chat request as a JSON "body" is accepted too.
+    An API Gateway proxy event (JSON "body") gets a proxy response: statusCode 200, or 400 with {"error"}.
 
 Variables (Lambda environment):
     MODEL_ID                        - Bedrock model or inference profile id (Claude Haiku, eu. profile)
@@ -27,9 +27,15 @@ def run(event, bedrock, clients, env):
     """Whole request with injected clients, so tests run without AWS."""
     if isinstance(event, dict) and "body" in event:
         try:
-            event = json.loads(event["body"] or "{}")
+            result = _run(json.loads(event["body"] or "{}"), bedrock, clients, env)
         except json.JSONDecodeError:
-            return {"error": "Body must be JSON"}
+            result = {"error": "Body must be JSON"}
+        return {"statusCode": 400 if "error" in result else 200,
+                "headers": {"Content-Type": "application/json"}, "body": json.dumps(result)}
+    return _run(event, bedrock, clients, env)
+
+
+def _run(event, bedrock, clients, env):
     if not isinstance(event, dict):
         return {"error": "Request must be a JSON object"}
 

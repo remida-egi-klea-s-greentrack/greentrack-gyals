@@ -161,11 +161,17 @@ def test_weekly_report_uses_fixed_tools_and_no_tool_use(athena):
 def test_handler_validates_requests():
     assert handler.run({}, None, {}, ENV) == {"error": "Field 'message' is required"}
     assert "longer" in handler.run({"message": "x" * 2000}, None, {}, ENV)["error"]
-    assert handler.run({"body": "not json"}, None, {}, ENV) == {"error": "Body must be JSON"}
     assert "data covers" in handler.run({"report": "weekly", "week_start": "2012-01-02"}, None, {}, ENV)["error"]
 
 
-def test_handler_accepts_api_gateway_body():
+def test_handler_answers_api_gateway_with_a_proxy_response():
     bedrock = FakeBedrock([final("Hi.")])
     out = handler.run({"body": json.dumps({"message": "Hello", "session_id": "s1"})}, bedrock, {}, ENV)
-    assert out == {"answer": "Hi.", "citations": [], "tools_used": []}
+    assert out["statusCode"] == 200 and out["headers"] == {"Content-Type": "application/json"}
+    assert json.loads(out["body"]) == {"answer": "Hi.", "citations": [], "tools_used": []}
+
+
+def test_handler_returns_400_to_api_gateway_on_bad_requests():
+    for body in ("not json", json.dumps({"session_id": "s1"})):
+        out = handler.run({"body": body}, None, {}, ENV)
+        assert out["statusCode"] == 400 and "error" in json.loads(out["body"])
