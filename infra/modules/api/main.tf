@@ -96,7 +96,7 @@ resource "aws_lambda_function" "this" {
         DYNAMODB_TABLE_CONSUMPTION = lookup(local.table_names, "consumption", "")
         DYNAMODB_TABLE_ANOMALIES   = lookup(local.table_names, "anomalies", "")
         # Tabela e re forecasts për ML predictions
-        DYNAMODB_TABLE_FORECASTS   = lookup(local.table_names, "forecasts", "")
+        DYNAMODB_TABLE_FORECASTS = lookup(local.table_names, "forecasts", "")
       } : {}
     )
   }
