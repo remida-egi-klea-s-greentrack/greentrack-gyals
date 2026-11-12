@@ -23,7 +23,7 @@ def hours_rows(start="2009-11-01", days=60, incomplete=("2009-11-20 05:00:00",))
     for t in index:
         kwh = 0.5 + 0.4 * np.sin(2 * np.pi * t.hour / 24) ** 2 + 0.1 * (t.day_of_week >= 5)
         complete = str(t) not in incomplete
-        rows.append([f"{t:%Y-%m-%d %H:%M:%S}.000", f"{kwh:.4f}", "true" if complete else "false"])
+        rows.append([f"{t:%Y-%m-%d %H:%M:%S}.000 UTC", f"{kwh:.4f}", "true" if complete else "false"])
     return rows
 
 
@@ -38,6 +38,7 @@ def short_windows(monkeypatch):
 def test_hourly_frame_parses_athena_strings_and_blanks_incomplete_hours():
     frame = steps.hourly_frame(hours_rows(days=2, incomplete=("2009-11-01 03:00:00",)))
     assert frame["complete"].dtype == bool and frame["timestamp"].iloc[0] == pd.Timestamp("2009-11-01")
+    assert frame["timestamp"].dt.tz is None
     assert frame["global_active_power_kwh"].isna().sum() == 1 and not frame.loc[3, "complete"]
 
 
