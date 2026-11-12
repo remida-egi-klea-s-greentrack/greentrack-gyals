@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Create Lambda deployment package ZIP file."""
 import os
+import sys
 import zipfile
 from pathlib import Path
 
@@ -81,4 +82,7 @@ def create_lambda_zip():
     return zip_path
 
 if __name__ == "__main__":
+    # Konsola e Windows (cp1252) nuk shkruan emoji; pa këtë skripti rrëzohet pasi ka fshirë zip-in e vjetër.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     create_lambda_zip()
