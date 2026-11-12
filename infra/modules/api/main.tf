@@ -5,6 +5,12 @@ locals {
     forecast    = { handler = "app.backend.forecast.handler", method = "GET", path = "/forecast" }
     chat        = { handler = "app.backend.chat.handler", method = "POST", path = "/chat" }
   }
+
+  # Extract table names from ARNs
+  table_names = {
+    for key, arn in var.dynamodb_table_arns :
+    key => split("/", arn)[1]
+  }
 }
 
 data "aws_iam_policy_document" "lambda_assume" {
@@ -28,15 +34,67 @@ resource "aws_iam_role_policy_attachment" "logs" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
+# DynamoDB access policy
+data "aws_iam_policy_document" "dynamodb_access" {
+  statement {
+    sid    = "DynamoDBAccess"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "dynamodb:UpdateItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:BatchGetItem",
+      "dynamodb:BatchWriteItem"
+    ]
+
+    resources = values(var.dynamodb_table_arns)
+  }
+}
+
+resource "aws_iam_policy" "dynamodb_access" {
+  name        = "${var.name_prefix}-lambda-dynamodb"
+  description = "Allow Lambda functions to access DynamoDB tables"
+  policy      = data.aws_iam_policy_document.dynamodb_access.json
+}
+
+resource "aws_iam_role_policy_attachment" "dynamodb" {
+  role       = aws_iam_role.lambda.name
+  policy_arn = aws_iam_policy.dynamodb_access.arn
+}
+
+data "archive_file" "lambda_package" {
+  type        = "zip"
+  source_dir  = "${path.module}/../../../app"
+  output_path = var.package_path
+  excludes    = ["__pycache__", "*.pyc", ".pytest_cache", "tests"]
+}
+
 resource "aws_lambda_function" "this" {
-  for_each      = local.functions
-  function_name = "${var.name_prefix}-${each.key}"
-  role          = aws_iam_role.lambda.arn
-  runtime       = "python3.11"
-  handler       = each.value.handler
-  filename      = var.package_path
-  timeout       = 15
-  memory_size   = 256
+  for_each         = local.functions
+  function_name    = "${var.name_prefix}-${each.key}"
+  role             = aws_iam_role.lambda.arn
+  runtime          = "python3.11"
+  handler          = each.value.handler
+  filename         = data.archive_file.lambda_package.output_path
+  source_code_hash = data.archive_file.lambda_package.output_base64sha256
+  timeout          = 15
+  memory_size      = 256
+
+  environment {
+    variables = merge(
+      {
+        REGION = "eu-central-1"
+      },
+      length(local.table_names) > 0 ? {
+        DYNAMODB_TABLE_CONSUMPTION = lookup(local.table_names, "consumption", "")
+        DYNAMODB_TABLE_ANOMALIES   = lookup(local.table_names, "anomalies", "")
+      } : {}
+    )
+  }
 }
 
 resource "aws_apigatewayv2_api" "this" {

@@ -1,13 +1,15 @@
 """DATA-03: Build the gold tables from the silver Iceberg table."""
+import argparse
 from pathlib import Path
 
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
-REPO = Path(__file__).resolve().parents[2]
+_HERE = Path(__file__).resolve()
+# On Glue the script runs from a temporary folder, so fall back to the current one.
+REPO = _HERE.parents[2] if len(_HERE.parents) > 2 else Path.cwd()
 WAREHOUSE = f"file://{REPO}/data/lakehouse/warehouse"
 EXPORT_DIR = f"file://{REPO}/data/lakehouse/exports"
-SILVER_TABLE = "local.silver.household_power"
 
 SUB_METERS = {
     "sub_metering_1": "sub_metering_1_kwh",  # kitchen
@@ -17,17 +19,39 @@ SUB_METERS = {
 KWH_COLUMNS = ["global_active_power_kwh", *SUB_METERS.values()]
 
 
-def build_spark() -> SparkSession:
-    return (
+def parse_args():
+    """Settings. With no arguments it runs locally; the Glue job passes S3 paths and catalog names."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--catalog", choices=["local", "glue"], default="local")
+    parser.add_argument("--warehouse", default=WAREHOUSE)
+    parser.add_argument("--silver_db", default="silver")
+    parser.add_argument("--gold_db", default="gold")
+    parser.add_argument("--export_dir", default=EXPORT_DIR)
+    args, _unknown = parser.parse_known_args()  # Glue also passes its own arguments
+    return args
+
+
+def build_spark(args) -> SparkSession:
+    """Spark with Iceberg. The catalog alias is "local" in both environments:
+    locally its tables are folders in the warehouse; on AWS they are registered
+    in the Glue Data Catalog and stored in S3."""
+    builder = (
         SparkSession.builder.appName("greentrack-gold")
         .config("spark.sql.extensions",
                 "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
         .config("spark.sql.catalog.local", "org.apache.iceberg.spark.SparkCatalog")
-        .config("spark.sql.catalog.local.type", "hadoop")
-        .config("spark.sql.catalog.local.warehouse", WAREHOUSE)
+        .config("spark.sql.catalog.local.warehouse", args.warehouse)
         .config("spark.sql.session.timeZone", "UTC")
-        .getOrCreate()
     )
+    if args.catalog == "glue":
+        builder = (
+            builder.config("spark.sql.catalog.local.catalog-impl",
+                           "org.apache.iceberg.aws.glue.GlueCatalog")
+            .config("spark.sql.catalog.local.io-impl", "org.apache.iceberg.aws.s3.S3FileIO")
+        )
+    else:
+        builder = builder.config("spark.sql.catalog.local.type", "hadoop")
+    return builder.getOrCreate()
 
 
 def hourly(silver):
@@ -164,10 +188,12 @@ def check_hourly(hourly_df):
 
 
 def main():
-    spark = build_spark()
+    args = parse_args()
+    spark = build_spark(args)
+    gold = f"local.{args.gold_db}"
     spark.sparkContext.setLogLevel("WARN")
 
-    silver = spark.table(SILVER_TABLE)
+    silver = spark.table(f"local.{args.silver_db}.household_power")
     hourly_df = hourly(silver).cache()
     check_hourly(hourly_df)
 
@@ -178,20 +204,19 @@ def main():
         "gold_submetering_monthly": submetering_monthly(hourly_df),
     }
 
-    spark.sql("CREATE NAMESPACE IF NOT EXISTS local.gold")
+    spark.sql(f"CREATE NAMESPACE IF NOT EXISTS {gold}")
     for name, df in tables.items():
-        df.writeTo(f"local.gold.{name}").createOrReplace()
-        print(f"Wrote local.gold.{name}: {spark.table(f'local.gold.{name}').count():,} rows")
+        df.writeTo(f"{gold}.{name}").createOrReplace()
+        print(f"Wrote {gold}.{name}: {spark.table(f'{gold}.{name}').count():,} rows")
 
-  
     # timestamp_ntz = timestamp without timezone, as ML's input_data.py expects.
     for name, df in tables.items():
         if "timestamp" in df.columns:
             df = df.withColumn("timestamp", F.col("timestamp").cast("timestamp_ntz")).orderBy("timestamp")
         out = df.coalesce(1)
-        out.write.mode("overwrite").parquet(f"{EXPORT_DIR}/{name}")
-        out.write.mode("overwrite").option("header", True).csv(f"{EXPORT_DIR}/{name}_csv")
-    print("Exported all gold tables to data/lakehouse/exports/")
+        out.write.mode("overwrite").parquet(f"{args.export_dir}/{name}")
+        out.write.mode("overwrite").option("header", True).csv(f"{args.export_dir}/{name}_csv")
+    print(f"Exported all gold tables to {args.export_dir}/")
 
     summary = hourly_df.agg(
         F.sum(F.col("complete").cast("int")).alias("complete"),
@@ -200,11 +225,10 @@ def main():
     print("\n===== GOLD REPORT =====")
     print(f"Complete hours:   {summary['complete']:,}")
     print(f"Incomplete hours: {summary['incomplete']:,}")
-    spark.table("local.gold.gold_submetering_monthly").show(3)
-    spark.table("local.gold.gold_peak_hour_stats").filter("day_type = 'weekday'").show(24)
+    spark.table(f"{gold}.gold_submetering_monthly").show(3)
+    spark.table(f"{gold}.gold_peak_hour_stats").filter("day_type = 'weekday'").show(24)
 
     spark.stop()
-
-
+    
 if __name__ == "__main__":
     main()
