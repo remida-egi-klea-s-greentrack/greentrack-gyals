@@ -44,4 +44,7 @@ module "api" {
   source              = "./modules/api"
   name_prefix         = local.name_prefix
   dynamodb_table_arns = module.dynamodb.table_arns
+
+  # Zip i ndërtuar nga infra/build/create_lambda_zip.py
+  package_path = "${path.root}/build/lambda.zip"
 }

@@ -1,60 +1,60 @@
 """Tests for gold layer integration."""
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pandas as pd
+import pandas as pd  # used by MLForecastTest (local-only adapter)
 
 
 class GoldLoaderTest(unittest.TestCase):
     """Tests for gold_loader module."""
     
-    @patch("app.adapters.gold_loader.pd.read_parquet")
-    @patch("app.adapters.gold_loader.get_gold_exports_dir")
-    def test_load_hourly_consumption_returns_records(self, mock_get_dir, mock_read_parquet):
-        """Test that hourly consumption is loaded correctly."""
+    HOURLY_CSV = (
+        "timestamp,global_active_power_kwh,sub_metering_1_kwh,sub_metering_2_kwh,"
+        "sub_metering_3_kwh,minutes_recorded,complete\n"
+        "2024-01-01T00:00:00,1.5,0.5,0.3,0.2,60,true\n"
+        "2024-01-01T01:00:00,6.5,0.6,0.4,0.3,60,true\n"
+        "2024-01-01T02:00:00,,,,,12,false\n"
+    )
+
+    def setUp(self):
+        from app.adapters import gold_loader
+        gold_loader._cache.clear()
+
+    @patch("app.adapters.gold_loader._read_csv_text_from_s3")
+    def test_load_hourly_consumption_returns_records(self, mock_s3):
+        """Test that hourly consumption is parsed from CSV and incomplete hours dropped."""
         from app.adapters.gold_loader import load_hourly_consumption
-        
-        # Mock directory path
-        mock_get_dir.return_value = MagicMock()
-        mock_get_dir.return_value.__truediv__ = lambda self, x: MagicMock(exists=lambda: True)
-        
-        # Mock DataFrame
-        mock_df = pd.DataFrame({
-            "timestamp": pd.to_datetime(["2024-01-01 00:00:00", "2024-01-01 01:00:00"]),
-            "global_active_power_kwh": [1.5, 2.0],
-            "sub_metering_1_kwh": [0.5, 0.6],
-            "sub_metering_2_kwh": [0.3, 0.4],
-            "sub_metering_3_kwh": [0.2, 0.3],
-            "minutes_recorded": [60, 60],
-            "complete": [True, True],
-        })
-        mock_read_parquet.return_value = mock_df
-        
+
+        mock_s3.return_value = self.HOURLY_CSV
+
         records = load_hourly_consumption(limit=10)
-        
-        # Proper assertions
+
+        mock_s3.assert_called_once_with("gold_hourly_consumption")
         self.assertIsInstance(records, list, "Should return a list")
-        self.assertEqual(len(records), 2, "Should return 2 records")
-        self.assertIn("timestamp", records[0], "Record should have timestamp")
-        self.assertIn("global_active_power_kwh", records[0], "Record should have global_active_power_kwh")
+        self.assertEqual(len(records), 2, "Should drop the incomplete hour")
+        self.assertEqual(records[0]["timestamp"], "2024-01-01T00:00:00")
+        self.assertEqual(records[0]["global_active_power_kwh"], 1.5)
+        self.assertEqual(records[0]["minutes_recorded"], 60)
         self.assertTrue(records[0]["complete"], "Record should be marked as complete")
-    
-    @patch("app.adapters.gold_loader.pd.read_parquet")
-    @patch("app.adapters.gold_loader.get_gold_exports_dir")
-    def test_detect_anomalies_finds_high_consumption(self, mock_get_dir, mock_read_parquet):
+
+    @patch("app.adapters.gold_loader._read_csv_text_local")
+    @patch("app.adapters.gold_loader._read_csv_text_from_s3")
+    def test_falls_back_to_local_csv(self, mock_s3, mock_local):
+        """If S3 fails, the local CSV export is used."""
+        from app.adapters.gold_loader import load_hourly_consumption
+
+        mock_s3.side_effect = RuntimeError("no creds")
+        mock_local.return_value = self.HOURLY_CSV
+
+        self.assertEqual(len(load_hourly_consumption()), 2)
+
+    @patch("app.adapters.gold_loader._read_csv_text_from_s3")
+    def test_detect_anomalies_finds_high_consumption(self, mock_s3):
         """Test that anomaly detection finds high consumption hours."""
         from app.adapters.gold_loader import detect_anomalies_simple
-        
-        mock_get_dir.return_value = MagicMock()
-        mock_get_dir.return_value.__truediv__ = lambda self, x: MagicMock(exists=lambda: True)
-        
-        mock_df = pd.DataFrame({
-            "timestamp": pd.to_datetime(["2024-01-01 00:00:00", "2024-01-01 01:00:00"]),
-            "global_active_power_kwh": [2.0, 6.5],  # 6.5 is above threshold
-            "complete": [True, True],
-        })
-        mock_read_parquet.return_value = mock_df
-        
+
+        mock_s3.return_value = self.HOURLY_CSV
+
         anomalies = detect_anomalies_simple(threshold_kwh=5.0)
         
         # Proper assertions

@@ -71,6 +71,36 @@ resource "aws_iam_role_policy_attachment" "dynamodb" {
   policy_arn = aws_iam_policy.dynamodb_access.arn
 }
 
+# S3 access policy për gold data (Developer A)
+data "aws_iam_policy_document" "s3_gold_access" {
+  statement {
+    sid    = "S3GoldDataRead"
+    effect = "Allow"
+
+    actions = [
+      "s3:GetObject",
+      "s3:ListBucket"
+    ]
+
+    # Allow reading gold CSV exports (Developer A)
+    resources = [
+      "arn:aws:s3:::g2-greentrack-gold-886565871385",
+      "arn:aws:s3:::g2-greentrack-gold-886565871385/exports/*"
+    ]
+  }
+}
+
+resource "aws_iam_policy" "s3_gold_access" {
+  name        = "${var.name_prefix}-lambda-s3-gold"
+  description = "Allow Lambda functions to read gold data from S3"
+  policy      = data.aws_iam_policy_document.s3_gold_access.json
+}
+
+resource "aws_iam_role_policy_attachment" "s3_gold" {
+  role       = aws_iam_role.lambda.name
+  policy_arn = aws_iam_policy.s3_gold_access.arn
+}
+
 # Lambda package is pre-built using scripts/build-lambda.ps1
 # This avoids Terraform trying to zip the entire app directory
 # which can take a long time and include unnecessary files
@@ -84,12 +114,16 @@ resource "aws_lambda_function" "this" {
   filename         = var.package_path
   source_code_hash = filebase64sha256(var.package_path)
   timeout          = 15
-  memory_size      = 256
+  memory_size      = 512 # më shumë CPU për cold start (lexim CSV ~2 MB nga S3)
+
+  # Gold data lexohet si CSV me csv + boto3, prandaj nuk duhet layer pandas/pyarrow.
 
   environment {
     variables = merge(
       {
-        REGION = "eu-central-1"
+        REGION      = "eu-central-1"
+        GOLD_BUCKET = "g2-greentrack-gold-886565871385" # Gold CSV exports (Developer A)
+        GOLD_PREFIX = "exports/"
       },
       length(local.table_names) > 0 ? {
         # DynamoDB table names për Lambda environment variables
