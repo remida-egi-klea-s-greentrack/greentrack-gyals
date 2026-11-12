@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import pandas as pd
+import numpy as np
 
 
 def get_gold_exports_dir() -> Path:
@@ -37,15 +38,18 @@ def load_hourly_consumption(limit: int = 100) -> List[Dict[str, Any]]:
     # Take most recent records
     df = df.sort_values("timestamp", ascending=False).head(limit)
     
+    # Replace NaN with None for JSON serialization
+    df = df.replace({np.nan: None})
+    
     # Convert to list of dicts matching contract format
     records = []
     for _, row in df.iterrows():
         records.append({
             "timestamp": row["timestamp"].isoformat(),
-            "global_active_power_kwh": float(row["global_active_power_kwh"]),
-            "sub_metering_1_kwh": float(row["sub_metering_1_kwh"]),
-            "sub_metering_2_kwh": float(row["sub_metering_2_kwh"]),
-            "sub_metering_3_kwh": float(row["sub_metering_3_kwh"]),
+            "global_active_power_kwh": float(row["global_active_power_kwh"]) if pd.notna(row["global_active_power_kwh"]) else None,
+            "sub_metering_1_kwh": float(row["sub_metering_1_kwh"]) if pd.notna(row["sub_metering_1_kwh"]) else None,
+            "sub_metering_2_kwh": float(row["sub_metering_2_kwh"]) if pd.notna(row["sub_metering_2_kwh"]) else None,
+            "sub_metering_3_kwh": float(row["sub_metering_3_kwh"]) if pd.notna(row["sub_metering_3_kwh"]) else None,
             "minutes_recorded": int(row["minutes_recorded"]),
             "complete": bool(row["complete"]),
         })
@@ -105,11 +109,20 @@ def detect_anomalies_simple(threshold_kwh: float = 5.0) -> List[Dict[str, Any]]:
         # Simple score: how much over the threshold
         score = min((row["global_active_power_kwh"] / threshold_kwh), 1.0)
         
+        # Determine severity based on consumption level
+        consumption = row["global_active_power_kwh"]
+        if consumption > 6.0:
+            severity = "high"
+        elif consumption > 5.5:
+            severity = "medium"
+        else:
+            severity = "low"
+        
         anomalies.append({
             "timestamp": row["timestamp"].isoformat(),
-            "global_active_power_kwh": float(row["global_active_power_kwh"]),
+            "consumption_kwh": float(row["global_active_power_kwh"]),
             "anomaly_score": round(score, 3),
-            "reason": f"High consumption: {row['global_active_power_kwh']:.2f} kWh (threshold: {threshold_kwh} kWh)",
+            "severity": severity,
         })
     
     return anomalies

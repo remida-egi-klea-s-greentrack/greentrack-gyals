@@ -1,0 +1,14 @@
+# Terraform variables for GreenTrack deployment
+# Copy this file to terraform.tfvars and update with your values
+
+aws_region   = "eu-central-1"
+group_prefix = "g2"  # Change to g1, g3, or g4 based on your group
+project_name = "greentrack"
+environment  = "dev"
+
+default_tags = {
+  Project     = "GreenTrack"
+  ManagedBy   = "Terraform"
+  Environment = "dev"
+  Team        = "Group2"  # Update based on your group
+}

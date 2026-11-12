@@ -82,3 +82,24 @@ def test_missing_columns_are_rejected(predictions):
 def test_empty_predictions_are_rejected(predictions):
     with pytest.raises(ValueError, match="No predictions"):
         baseline_error_metrics(predictions.iloc[:0])
+
+
+def test_shared_metrics_support_xgboost(predictions):
+    from ml.forecasting.metrics import forecast_error_metrics
+
+    predictions = predictions.copy()
+    predictions["xgboost_pred_kwh"] = (
+        predictions["actual_kwh"] + 0.5
+    )
+
+    per_day, overall = forecast_error_metrics(
+        predictions,
+        {"xgboost": "xgboost_pred_kwh"},
+    )
+
+    assert len(per_day) == 2
+    assert len(overall) == 1
+    assert overall.iloc[0]["model"] == "xgboost"
+    assert overall.iloc[0]["rmse_kwh"] == pytest.approx(0.5)
+    assert overall.iloc[0]["mae_kwh"] == pytest.approx(0.5)
+    assert overall.iloc[0]["mape_pct"] == pytest.approx(26.0416666667)

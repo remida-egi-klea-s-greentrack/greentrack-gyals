@@ -1,0 +1,103 @@
+name: Deploy Frontend
+
+# DISABLED: This workflow is in draft mode and requires AWS access
+# To enable: Remove the 'if: false' condition and configure AWS credentials
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'app/frontend/**'
+      - '.github/workflows/deploy-frontend.yml'
+  workflow_dispatch:  # Manual trigger
+
+# TODO: Add OIDC permissions when AWS access is configured
+# permissions:
+#   id-token: write
+#   contents: read
+
+jobs:
+  deploy-frontend:
+    runs-on: ubuntu-latest
+    if: false  # DISABLED - Remove this line when AWS is configured
+    environment: production  # Requires approval
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: app/frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: app/frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: app/frontend
+        run: npm run build
+        env:
+          # TODO: Set API URL from Terraform output
+          # VITE_API_URL: ${{ secrets.API_GATEWAY_URL }}
+          VITE_API_URL: 'http://localhost:8080'
+
+      - name: Run frontend tests
+        working-directory: app/frontend
+        run: npm test --if-present
+        continue-on-error: true
+
+      # TODO: Configure AWS credentials with OIDC
+      # - name: Configure AWS credentials
+      #   uses: aws-actions/configure-aws-credentials@v4
+      #   with:
+      #     role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+      #     aws-region: eu-central-1
+
+      # TODO: Deploy to S3
+      # - name: Deploy to S3
+      #   run: |
+      #     aws s3 sync app/frontend/dist/ s3://${{ secrets.FRONTEND_BUCKET }}/ --delete
+      #     echo "✅ Frontend uploaded to S3"
+      #
+      # - name: Invalidate CloudFront cache
+      #   run: |
+      #     aws cloudfront create-invalidation \
+      #       --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
+      #       --paths "/*"
+      #     echo "✅ CloudFront cache invalidated"
+      #
+      # - name: Deployment Summary
+      #   run: |
+      #     echo "✅ Frontend deployed successfully!"
+      #     echo ""
+      #     echo "🌐 URL: https://${{ secrets.CLOUDFRONT_DOMAIN }}"
+      #     echo "📦 Bucket: ${{ secrets.FRONTEND_BUCKET }}"
+      #     echo ""
+      #     echo "Cache invalidation may take 5-10 minutes to propagate."
+
+      - name: Placeholder - AWS Configuration Needed
+        run: |
+          echo "⚠️  Frontend deployment requires AWS credentials"
+          echo "📋 Setup required:"
+          echo "  1. Configure OIDC with AWS"
+          echo "  2. Add required secrets:"
+          echo "     - AWS_ROLE_ARN"
+          echo "     - FRONTEND_BUCKET (from Terraform output)"
+          echo "     - CLOUDFRONT_DISTRIBUTION_ID (from Terraform output)"
+          echo "     - CLOUDFRONT_DOMAIN (from Terraform output)"
+          echo "     - API_GATEWAY_URL (for VITE_API_URL)"
+          echo "  3. Uncomment deployment steps in this workflow"
+          echo ""
+          echo "✅ Build succeeded! Output in app/frontend/dist/"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: app/frontend/dist/
+          retention-days: 7
