@@ -99,7 +99,8 @@ def test_tool_round_then_answer(athena):
 
     assert out == {"answer": "Peak: Tuesday 19:00, 3.2 kWh.", "citations": ["gold_hourly_consumption"], "tools_used": ["peak_hours"]}
     assert "LIMIT 3" in athena[0]
-    second = bedrock.requests[1]
+    first, second = bedrock.requests
+    assert first["messages"][0]["content"] == [{"guardContent": {"text": {"text": "When was my peak last week?"}}}]
     assert second["guardrailConfig"] == {"guardrailIdentifier": "g", "guardrailVersion": "1"}
     result = second["messages"][-1]["content"][0]["toolResult"]
     assert result["status"] == "success" and result["content"][0]["json"]["rows"] == [["2010-11-23 19:00:00.000", "3.2"]]
@@ -126,6 +127,14 @@ def test_loop_stops_after_max_turns(athena):
     assert out["answer"] == agent.REFUSAL and len(bedrock.requests) == agent.MAX_TURNS
 
 
+def test_without_guardrail_the_question_is_plain_text():
+    env = {k: v for k, v in ENV.items() if not k.startswith("GUARDRAIL")}
+    bedrock = FakeBedrock([final("Hi.")])
+    agent.answer("Hello", bedrock, {}, env)
+    assert bedrock.requests[0]["messages"][0]["content"] == [{"text": "Hello"}]
+    assert "guardrailConfig" not in bedrock.requests[0]
+
+
 def test_system_prompt_states_the_rules():
     assert "read-only" in agent.SYSTEM_PROMPT and "Never estimate" in agent.SYSTEM_PROMPT
     assert str(tools.LAST_DAY) in agent.SYSTEM_PROMPT
@@ -142,6 +151,8 @@ def test_weekly_report_uses_fixed_tools_and_no_tool_use(athena):
     assert out["citations"] == ["gold_hourly_consumption", "ml-inference"]
     assert len(athena) == 5 and "TIMESTAMP '2010-11-08 00:00:00'" in athena[1]  # previous week
     assert "toolConfig" not in bedrock.requests[0]
+    facts, guarded = bedrock.requests[0]["messages"][0]["content"]
+    assert facts["text"].startswith("Facts (JSON): ") and "Write a weekly energy report" in guarded["guardContent"]["text"]["text"]
     assert inference.payloads[0][1] == {"start": "2010-11-15T00:00:00", "end": "2010-11-22T00:00:00"}
 
 
