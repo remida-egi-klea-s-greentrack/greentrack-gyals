@@ -15,3 +15,8 @@ output "glue_job_names" {
 output "athena_workgroup" {
   value = module.data.athena_workgroup
 }
+
+
+output "state_machine_arn" {
+  value = module.data.state_machine_arn
+}
