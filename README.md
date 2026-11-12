@@ -127,8 +127,8 @@ terraform plan "-var-file=terraform.tfvars" "-out=tfplan"
 terraform apply tfplan
 ```
 
-> Do not use `update-lambdas*.ps1`: they upload code outside Terraform and the next apply
-> will not notice. Terraform is the only deploy path for Lambda code.
+> Lambda code is deployed only through Terraform (old scripts that uploaded code outside Terraform were removed, because the next apply
+> would not notice them).
 
 ### Test Production
 ```bash
@@ -227,10 +227,10 @@ aws_region   = "eu-central-1"
 
 ## 📚 Documentation
 
-- **[DEPLOYMENT_SUMMARY.md](./DEPLOYMENT_SUMMARY.md)** - AWS deployment guide
-- **[DEVELOPER_C_COMPLETION_REPORT.md](./DEVELOPER_C_COMPLETION_REPORT.md)** - Full task completion report
 - **[ARCHITECTURE.md](./ARCHITECTURE.md)** - System architecture
-- **[CLEANUP_SUMMARY.md](./CLEANUP_SUMMARY.md)** - Project history
+- **[infra/README.md](./infra/README.md)** / **[infra/DEPLOYMENT.md](./infra/DEPLOYMENT.md)** - Terraform modules and AWS deployment
+- **[infra/github-oidc/](./infra/github-oidc/)** - GitHub Actions OIDC roles
+- **[ROADMAP.md](./ROADMAP.md)** - Roadmap
 
 ## 🤝 Team Structure
 
