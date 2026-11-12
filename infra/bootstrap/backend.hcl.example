@@ -1,0 +1,10 @@
+# Example backend configuration for Terraform 1.10+
+# Copy this to backend.hcl and fill in the actual bucket name from bootstrap outputs
+#
+# After running 'terraform apply' in bootstrap/, use the output 'state_bucket' value here
+
+bucket       = "g2-greentrack-tfstate-123456789012"  # From bootstrap output 'state_bucket'
+key          = "bootstrap/terraform.tfstate"
+region       = "eu-central-1"
+encrypt      = true
+use_lockfile = true  # Terraform 1.10+ native S3 locking (no DynamoDB needed)
