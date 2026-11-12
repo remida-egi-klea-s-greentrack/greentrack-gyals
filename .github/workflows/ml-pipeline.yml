@@ -1,0 +1,48 @@
+# Starts the SageMaker forecast pipeline (Challenge 3) and waits for the result.
+# Manual trigger on main only; AWS access through OIDC (role in infra/modules/ml/pipeline.tf, no stored keys).
+# Repository secret: ML_PIPELINE_ROLE_ARN (Terraform output github_pipeline_role_arn).
+# Variables: PIPELINE - pipeline name; MAX_MINUTES - how long to wait before giving up (the run continues).
+name: ML Pipeline
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  PIPELINE: g2-greentrack-forecast-pipeline
+  MAX_MINUTES: 45
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.ML_PIPELINE_ROLE_ARN }}
+          aws-region: eu-central-1
+
+      - name: Start and wait
+        run: |
+          arn=$(aws sagemaker start-pipeline-execution --pipeline-name "$PIPELINE" \
+            --pipeline-execution-display-name "github-${GITHUB_RUN_ID}" \
+            --query PipelineExecutionArn --output text)
+          echo "Started $arn"
+          for _ in $(seq $((MAX_MINUTES * 2))); do
+            status=$(aws sagemaker describe-pipeline-execution --pipeline-execution-arn "$arn" \
+              --query PipelineExecutionStatus --output text)
+            echo "$(date -u +%H:%M) $status"
+            case "$status" in
+              Succeeded) exit 0 ;;
+              Failed|Stopped)
+                aws sagemaker list-pipeline-execution-steps --pipeline-execution-arn "$arn" \
+                  --query 'PipelineExecutionSteps[].[StepName,StepStatus,FailureReason]' --output table
+                exit 1 ;;
+            esac
+            sleep 30
+          done
+          echo "Still running after $MAX_MINUTES minutes; check the SageMaker console."
+          exit 1

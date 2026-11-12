@@ -1,6 +1,7 @@
 # GenAI module (Developer B): Bedrock guardrail and the assistant Lambda (Challenge 4).
 # Variables used: var.name_prefix, var.model_id, var.gold_database, var.athena_workgroup,
-# var.gold_bucket_arn, var.artifacts_bucket_arn, var.inference_lambda_arn, var.inference_lambda_name.
+# var.gold_bucket_arn, var.artifacts_bucket_arn, var.inference_lambda_arn, var.inference_lambda_name
+# (Knowledge Base for energy-saving advice: knowledge_base.tf).
 # Locals: refusal text shown when the guardrail blocks a request, Lambda name, model id without the
 # cross-region prefix (the eu. inference profile routes to the same model in several EU regions),
 # denied guardrail topics.
@@ -131,6 +132,7 @@ resource "aws_lambda_function" "assistant" {
       ATHENA_DATABASE    = var.gold_database
       ATHENA_WORKGROUP   = var.athena_workgroup
       INFERENCE_FUNCTION = var.inference_lambda_name
+      KNOWLEDGE_BASE_ID  = aws_bedrockagent_knowledge_base.energy.id
     }
   }
 
@@ -204,6 +206,12 @@ data "aws_iam_policy_document" "assistant" {
     sid       = "AthenaResultsObjects"
     actions   = ["s3:GetObject", "s3:PutObject"]
     resources = ["${var.artifacts_bucket_arn}/athena-results/*"]
+  }
+
+  statement {
+    sid       = "EnergyAdvice"
+    actions   = ["bedrock:Retrieve"]
+    resources = [aws_bedrockagent_knowledge_base.energy.arn]
   }
 
   statement {
