@@ -25,3 +25,34 @@ variable "force_destroy" {
   type        = bool
   default     = false
 }
+
+# Inference (passed to modules/ml):
+#   enable_endpoints              - create the serverless endpoints
+#   xgboost_image, rcf_image      - built-in algorithm images for the region
+#   xgboost_model_data, rcf_model_data - S3 URIs of the trained models
+
+variable "enable_endpoints" {
+  description = "Create the serverless XGBoost and RCF endpoints"
+  type        = bool
+  default     = false
+}
+
+variable "xgboost_image" {
+  description = "Built-in XGBoost image URI (algorithm mode)"
+  type        = string
+}
+
+variable "xgboost_model_data" {
+  description = "S3 URI of the trained XGBoost model.tar.gz"
+  type        = string
+}
+
+variable "rcf_image" {
+  description = "Built-in Random Cut Forest image URI"
+  type        = string
+}
+
+variable "rcf_model_data" {
+  description = "S3 URI of the trained RCF model.tar.gz"
+  type        = string
+}
