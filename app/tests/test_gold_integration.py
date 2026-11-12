@@ -1,5 +1,7 @@
 """Tests for gold layer integration."""
+import json
 import unittest
+import unittest.mock
 from unittest.mock import patch
 
 import pandas as pd  # used by MLForecastTest (local-only adapter)
@@ -155,6 +157,74 @@ class HandlerIntegrationTest(unittest.TestCase):
         self.assertIn("model_info", body, "Body should contain model_info")
         self.assertIsInstance(body["predictions"], list, "Predictions should be a list")
         self.assertIsInstance(body["model_info"], dict, "Model info should be a dict")
+
+
+class MLResultsTest(unittest.TestCase):
+    """Forecast/anomalies read from DynamoDB (ML loader output)."""
+
+    def _patch_query(self, items):
+        from decimal import Decimal  # noqa: F401
+        table = unittest.mock.MagicMock()
+        table.query.return_value = {"Items": items}
+        resource = unittest.mock.MagicMock()
+        resource.Table.return_value = table
+        return patch("boto3.resource", return_value=resource), table
+
+    @patch.dict("os.environ", {"DYNAMODB_TABLE_FORECASTS": "t-forecasts"})
+    def test_forecast_converts_decimal_and_orders_oldest_first(self):
+        from decimal import Decimal
+        from app.adapters.ml_results import load_forecast
+
+        items = [  # DynamoDB returns newest first (ScanIndexForward=False)
+            {"household_id": "household-1", "timestamp": "2010-11-26T01:00:00",
+             "predicted_kwh": Decimal("1.25"), "actual_kwh": Decimal("1.1")},
+            {"household_id": "household-1", "timestamp": "2010-11-26T00:00:00",
+             "predicted_kwh": Decimal("0.9"), "actual_kwh": Decimal("1")},
+        ]
+        p, table = self._patch_query(items)
+        with p:
+            data = load_forecast(24)
+
+        self.assertEqual(table.query.call_args.kwargs["Limit"], 24)
+        self.assertFalse(table.query.call_args.kwargs["ScanIndexForward"])
+        self.assertEqual([x["timestamp"] for x in data["predictions"]],
+                         ["2010-11-26T00:00:00", "2010-11-26T01:00:00"])
+        self.assertEqual(data["predictions"][1]["predicted_kwh"], 1.25)
+        self.assertIsInstance(data["predictions"][0]["actual_kwh"], int)
+        json.dumps(data)  # must be serializable
+
+    @patch.dict("os.environ", {"DYNAMODB_TABLE_ANOMALIES": "t-anomalies"})
+    def test_anomalies_newest_first_with_detector(self):
+        from decimal import Decimal
+        from app.adapters.ml_results import load_anomalies
+
+        items = [
+            {"household_id": "household-1", "timestamp_detector": "2010-11-20T18:00:00#rcf_raw_24",
+             "timestamp": "2010-11-20T18:00:00", "detector": "rcf_raw_24",
+             "consumption_kwh": Decimal("5.6"), "anomaly_score": Decimal("0.97"), "severity": "high"},
+            {"household_id": "household-1", "timestamp_detector": "2010-11-02T03:00:00#log_mad",
+             "detector": "log_mad", "consumption_kwh": Decimal("3.1"),
+             "anomaly_score": Decimal("0.7"), "severity": "medium"},
+        ]
+        p, _ = self._patch_query(items)
+        with p:
+            data = load_anomalies()
+
+        self.assertEqual(data["anomalies"][0]["timestamp"], "2010-11-20T18:00:00")
+        self.assertEqual(data["anomalies"][1]["timestamp"], "2010-11-02T03:00:00")  # from sort key
+        self.assertEqual(data["anomalies"][0]["detector"], "rcf_raw_24")
+        self.assertEqual(data["anomalies"][0]["anomaly_score"], 0.97)
+        json.dumps(data)
+
+    def test_handlers_fall_back_to_fixtures_when_table_empty(self):
+        from app.backend.anomalies import handler as anomalies_handler
+        from app.backend.forecast import handler as forecast_handler
+
+        with patch("app.adapters.ml_results._query_latest", return_value=[]):
+            f = json.loads(forecast_handler({"queryStringParameters": {"horizon_hours": "24"}}, None)["body"])
+            a = json.loads(anomalies_handler({}, None)["body"])
+        self.assertTrue(f["predictions"])
+        self.assertTrue(a["anomalies"])
 
 
 if __name__ == "__main__":
