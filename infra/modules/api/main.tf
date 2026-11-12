@@ -1,4 +1,9 @@
 locals {
+  # NOTE: Këto Lambda functions janë të APP backend (app/backend/*.py)
+  # dhe përdorin fixtures për demo. Pas demo, për ML integration të plotë:
+  # - forecast dhe anomalies duhet të thërrasin g2-greentrack-ml-inference
+  # - chat duhet të thërrasë g2-greentrack-assistant
+  # Por për tani handler-at tanë vazhdojnë të funksionojnë me fixtures.
   functions = {
     consumption = { handler = "app.backend.consumption.handler", method = "GET", path = "/consumption" }
     anomalies   = { handler = "app.backend.anomalies.handler", method = "GET", path = "/anomalies" }
@@ -87,8 +92,11 @@ resource "aws_lambda_function" "this" {
         REGION = "eu-central-1"
       },
       length(local.table_names) > 0 ? {
+        # DynamoDB table names për Lambda environment variables
         DYNAMODB_TABLE_CONSUMPTION = lookup(local.table_names, "consumption", "")
         DYNAMODB_TABLE_ANOMALIES   = lookup(local.table_names, "anomalies", "")
+        # Tabela e re forecasts për ML predictions
+        DYNAMODB_TABLE_FORECASTS   = lookup(local.table_names, "forecasts", "")
       } : {}
     )
   }
