@@ -1,5 +1,8 @@
 name: Deploy Frontend
 
+# DISABLED: This workflow is in draft mode and requires AWS access
+# To enable: Remove the 'if: false' condition and configure AWS credentials
+
 on:
   push:
     branches:
@@ -17,6 +20,7 @@ on:
 jobs:
   deploy-frontend:
     runs-on: ubuntu-latest
+    if: false  # DISABLED - Remove this line when AWS is configured
     environment: production  # Requires approval
     
     steps:
