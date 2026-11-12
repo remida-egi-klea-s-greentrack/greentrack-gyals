@@ -10,6 +10,7 @@ Variables:
     SPECS                 - tool descriptions and JSON schemas sent to Bedrock
     QUERIES               - SQL template per SQL tool; {db}, {start}, {end}, {top_n} are filled in after validation
     COLUMNS               - result column names per SQL tool, in SELECT order
+    KB_SOURCE, KB_RESULTS - label and number of passages for the energy-saving advice tool (Bedrock Knowledge Base)
 """
 
 import json
@@ -22,6 +23,9 @@ LAST_DAY = date(2010, 11, 26)
 TABLE = "gold_hourly_consumption"
 MAX_DAYS = {"daily_consumption": 62, "forecast_and_anomalies": 7}
 DEFAULT_MAX_DAYS = 400
+KB_SOURCE = "energy_guidance_kb"
+KB_RESULTS = 4
+MAX_ADVICE_QUERY = 300
 
 _KWH = "global_active_power_kwh"
 _WHERE = "WHERE \"timestamp\" >= TIMESTAMP '{start}' AND \"timestamp\" < TIMESTAMP '{end}'"
@@ -93,6 +97,11 @@ SPECS = [
           "Consumption split into kitchen, laundry, water heater and air conditioning, and everything else."),
     _spec("forecast_and_anomalies",
           "Day-ahead forecast and detected anomalies (log-MAD and Random Cut Forest) for at most 7 days."),
+    {"toolSpec": {"name": "energy_saving_advice",
+                  "description": "Passages from GreenTrack's energy-saving guidance (water heating, laundry, kitchen, "
+                                 "heating and cooling, standby power, reading the data), each with its source document.",
+                  "inputSchema": {"json": {"type": "object", "required": ["query"], "properties": {
+                      "query": {"type": "string", "description": "What advice is needed, in a few words"}}}}}},
 ]
 
 
@@ -132,8 +141,37 @@ def build_sql(name, args, database):
     return QUERIES[name].format(db=database, start=f"{start:%Y-%m-%d %H:%M:%S}", end=f"{end:%Y-%m-%d %H:%M:%S}", top_n=top_n)
 
 
+def energy_saving_advice(args, client, knowledge_base_id):
+    """Top passages from the Knowledge Base; "documents" lists "title (url)" of each document used, for citations."""
+    query = args.get("query") if isinstance(args, dict) else None
+    if not isinstance(query, str) or not query.strip():
+        raise ValueError("query must be a non-empty string")
+    if len(query) > MAX_ADVICE_QUERY:
+        raise ValueError(f"query must be at most {MAX_ADVICE_QUERY} characters")
+    if not knowledge_base_id:
+        raise RuntimeError("knowledge base is not configured")
+    response = client.retrieve(
+        knowledgeBaseId=knowledge_base_id,
+        retrievalQuery={"text": query.strip()},
+        retrievalConfiguration={"vectorSearchConfiguration": {"numberOfResults": KB_RESULTS}},
+    )
+    passages, documents = [], []
+    for item in response.get("retrievalResults", []):
+        meta = item.get("metadata", {})
+        uri = item.get("location", {}).get("s3Location", {}).get("uri", "")
+        title = meta.get("title") or uri.rsplit("/", 1)[-1]
+        document = f"{title} ({meta['source_url']})" if meta.get("source_url") else title
+        passages.append({"document": title, "text": item["content"]["text"]})
+        if document not in documents:
+            documents.append(document)
+    return {"source": KB_SOURCE, "passages": passages, "documents": documents}
+
+
 def run_tool(name, args, clients, env):
-    """Tool result as a JSON-friendly dict: {"source", "columns", "rows"} or the inference Lambda response."""
+    """Tool result as a JSON-friendly dict: {"source", "columns", "rows"}, the inference Lambda response,
+    or Knowledge Base passages."""
+    if name == "energy_saving_advice":
+        return energy_saving_advice(args, clients.get("bedrock_agent"), env.get("KNOWLEDGE_BASE_ID"))
     if name == "forecast_and_anomalies":
         start, end = parse_period(name, args)
         payload = json.dumps({"start": start.isoformat(), "end": end.isoformat()})
