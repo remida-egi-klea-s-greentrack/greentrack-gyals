@@ -13,3 +13,47 @@ variable "force_destroy" {
   type        = bool
   default     = false
 }
+
+# Inference (inference.tf).
+#   enable_endpoints            - create the two serverless endpoints (models and configs always exist; they cost nothing)
+#   xgboost_image, rcf_image    - built-in algorithm images for this region (same as used for training)
+#   xgboost_model_data, rcf_model_data - S3 URIs of the trained model.tar.gz files
+#   serverless_memory_mb, serverless_max_concurrency - serverless endpoint size; adjust after measuring
+
+variable "enable_endpoints" {
+  description = "Create the serverless XGBoost and RCF endpoints"
+  type        = bool
+  default     = false
+}
+
+variable "xgboost_image" {
+  description = "Built-in XGBoost image URI (algorithm mode) for this region"
+  type        = string
+}
+
+variable "xgboost_model_data" {
+  description = "S3 URI of the trained XGBoost model.tar.gz"
+  type        = string
+}
+
+variable "rcf_image" {
+  description = "Built-in Random Cut Forest image URI for this region"
+  type        = string
+}
+
+variable "rcf_model_data" {
+  description = "S3 URI of the trained RCF model.tar.gz"
+  type        = string
+}
+
+variable "serverless_memory_mb" {
+  description = "Memory per serverless endpoint (1024-6144, steps of 1024)"
+  type        = number
+  default     = 2048
+}
+
+variable "serverless_max_concurrency" {
+  description = "Maximum concurrent invocations per serverless endpoint"
+  type        = number
+  default     = 2
+}
