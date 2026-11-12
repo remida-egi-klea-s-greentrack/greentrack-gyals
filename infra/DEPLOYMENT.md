@@ -167,20 +167,11 @@ Before deploying, build the Lambda deployment package:
 
 ```bash
 # From repository root
-cd scripts/
-./build-lambda.sh
-
-# Or manually:
-cd app/
-pip install -r requirements.txt -t package/
-cp -r backend adapters __init__.py package/
-cd package/
-zip -r ../lambda-package.zip .
-cd ..
-rm -rf package/
+python infra/build/create_lambda_zip.py
 ```
 
-This creates `app/lambda-package.zip` with all dependencies.
+This creates `infra/build/lambda.zip` (dependencies from `infra/build/package/` + `app/` + `fixtures/`).
+Terraform deploys exactly this file (`package_path` in `infra/main.tf`).
 
 ---
 
@@ -266,15 +257,15 @@ open $(terraform output -raw cloudfront_url)
 
 ## 🔄 Update Deployment
 
-When code changes:
+Normally: open a PR, merge to `main`, and GitHub Actions deploys (see README → CI/CD).
+Manually, when code changes:
 
 ```bash
-# Rebuild Lambda
-cd scripts/
-./build-lambda.sh
+# Rebuild Lambda (from repository root)
+python infra/build/create_lambda_zip.py
 
-# Update infrastructure
-cd ../infra/
+# Update infrastructure + Lambda code
+cd infra/
 terraform apply -var-file=terraform.tfvars
 
 # Rebuild and deploy frontend
