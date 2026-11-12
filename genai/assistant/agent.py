@@ -49,9 +49,16 @@ def converse(bedrock, env, messages, use_tools=True):
     return bedrock.converse(**kwargs)
 
 
+def user_turn(text, env):
+    """First user message. With a guardrail, only this text is assessed (guardContent): not the system
+    prompt, the tool results or our own facts, which are trusted and would trigger false blocks."""
+    block = {"guardContent": {"text": {"text": text}}} if env.get("GUARDRAIL_ID") else {"text": text}
+    return {"role": "user", "content": [block]}
+
+
 def answer(question, bedrock, clients, env):
     """Chat contract response: {"answer", "citations", "tools_used"}."""
-    messages = [{"role": "user", "content": [{"text": question}]}]
+    messages = [user_turn(question, env)]
     citations, used = set(), []
 
     for _ in range(MAX_TURNS):
@@ -95,13 +102,15 @@ def weekly_report(week_start, bedrock, clients, env):
         "submetering": tools.run_tool("submetering_breakdown", week, clients, env),
         "forecast_and_anomalies": tools.run_tool("forecast_and_anomalies", week, clients, env),
     }
-    prompt = (
+    instruction = (
         f"Write a weekly energy report for {week['start']} to {week['end']} (end exclusive) in 5-8 short sentences: "
         "total and change versus the previous week, busiest day and peak hours, where the energy went (submetering), "
         "detected anomalies (say which detector), and how close the forecast was to the actual daily totals if you can tell. "
-        "Use only these facts:\n" + json.dumps(facts, default=str)
+        "Use only the facts given."
     )
-    response = converse(bedrock, env, [{"role": "user", "content": [{"text": prompt}]}], use_tools=False)
+    message = user_turn(instruction, env)
+    message["content"].insert(0, {"text": "Facts (JSON): " + json.dumps(facts, default=str)})
+    response = converse(bedrock, env, [message], use_tools=False)
     if response["stopReason"] == "guardrail_intervened":
         return {"report": REFUSAL, "citations": [], "tools_used": []}
     return {

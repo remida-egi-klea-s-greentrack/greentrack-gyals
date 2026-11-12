@@ -2,7 +2,8 @@
 # Variables used: var.name_prefix, var.model_id, var.gold_database, var.athena_workgroup,
 # var.gold_bucket_arn, var.artifacts_bucket_arn, var.inference_lambda_arn, var.inference_lambda_name.
 # Locals: refusal text shown when the guardrail blocks a request, Lambda name, model id without the
-# cross-region prefix (the eu. inference profile routes to the same model in several EU regions).
+# cross-region prefix (the eu. inference profile routes to the same model in several EU regions),
+# denied guardrail topics.
 
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
@@ -13,6 +14,25 @@ locals {
   lambda_name   = "${var.name_prefix}-assistant"
   refusal       = "I can only answer questions about this household's electricity consumption data."
   base_model_id = trimprefix(var.model_id, "eu.")
+
+  denied_topics = {
+    "programming-help" = {
+      definition = "Requests to write, explain or debug software code or scripts."
+      examples   = ["Write me a Python script to sort a list", "Fix this JavaScript error"]
+    }
+    "politics" = {
+      definition = "Questions about elections, political parties, politicians or political opinions."
+      examples   = ["Which political party should I vote for?", "What do you think of the president?"]
+    }
+    "investment-advice" = {
+      definition = "Advice on buying or selling stocks, cryptocurrencies or other investments."
+      examples   = ["Which stocks should I buy this year?", "Should I invest in bitcoin?"]
+    }
+    "medical-legal-advice" = {
+      definition = "Requests for medical diagnoses or treatment, or for legal advice."
+      examples   = ["What medicine should I take for a headache?", "Can I sue my landlord?"]
+    }
+  }
 }
 
 # ---------- Guardrail ----------
@@ -39,24 +59,30 @@ resource "aws_bedrock_guardrail" "assistant" {
     }
   }
 
+  # Topics are described by what they are (classifiers handle "anything except X" badly).
+  # Other off-topic questions are refused by the system prompt.
   topic_policy_config {
-    topics_config {
-      name       = "off-topic"
-      type       = "DENY"
-      definition = "Requests unrelated to household electricity use, energy forecasts, anomalies or saving energy, such as coding, politics, medical, legal or investment advice."
-      examples = [
-        "Write a Python script that scrapes a website",
-        "Which political party should I vote for?",
-        "Which stocks should I buy this year?",
-      ]
+    dynamic "topics_config" {
+      for_each = local.denied_topics
+      content {
+        name       = topics_config.key
+        type       = "DENY"
+        definition = topics_config.value.definition
+        examples   = topics_config.value.examples
+      }
     }
   }
 }
 
 # A fixed version, so a later edit of the draft guardrail does not change the running assistant.
+# Any guardrail change publishes a new version, which the Lambda then uses.
 resource "aws_bedrock_guardrail_version" "assistant" {
   guardrail_arn = aws_bedrock_guardrail.assistant.guardrail_arn
   description   = "Version used by the assistant Lambda"
+
+  lifecycle {
+    replace_triggered_by = [aws_bedrock_guardrail.assistant]
+  }
 }
 
 # ---------- Lambda ----------
