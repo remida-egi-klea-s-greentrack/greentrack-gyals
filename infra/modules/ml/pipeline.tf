@@ -246,9 +246,13 @@ data "aws_iam_policy_document" "pipeline" {
     ]
   }
 
+  # The Register step also calls CreateModelPackageGroup (a no-op when the group exists).
   statement {
-    sid     = "RegisterModel"
-    actions = ["sagemaker:CreateModelPackage", "sagemaker:DescribeModelPackage", "sagemaker:AddTags"]
+    sid = "RegisterModel"
+    actions = [
+      "sagemaker:CreateModelPackageGroup", "sagemaker:DescribeModelPackageGroup",
+      "sagemaker:CreateModelPackage", "sagemaker:DescribeModelPackage", "sagemaker:AddTags",
+    ]
     resources = [
       aws_sagemaker_model_package_group.forecast.arn,
       "arn:aws:sagemaker:${local.region}:${local.account_id}:model-package/${local.model_group}/*",
