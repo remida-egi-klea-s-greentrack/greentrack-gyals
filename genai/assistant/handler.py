@@ -10,6 +10,7 @@ Variables (Lambda environment):
     GUARDRAIL_ID, GUARDRAIL_VERSION - Bedrock guardrail applied to every model call
     ATHENA_DATABASE, ATHENA_WORKGROUP - Gold database and workgroup
     INFERENCE_FUNCTION              - forecast/anomaly Lambda used by the forecast_and_anomalies tool
+    KNOWLEDGE_BASE_ID               - Bedrock Knowledge Base used by the energy_saving_advice tool
 """
 
 import json
@@ -57,6 +58,7 @@ def lambda_handler(event, context):
     return run(
         event,
         bedrock=boto3.client("bedrock-runtime", config=retries),
-        clients={"athena": boto3.client("athena"), "lambda": boto3.client("lambda", config=Config(read_timeout=150))},
+        clients={"athena": boto3.client("athena"), "lambda": boto3.client("lambda", config=Config(read_timeout=150)),
+                 "bedrock_agent": boto3.client("bedrock-agent-runtime", config=retries)},
         env=os.environ,
     )

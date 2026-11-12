@@ -5,6 +5,7 @@
 #   gold_database, athena_workgroup - Gold tables and the workgroup that runs queries (modules/data)
 #   gold_bucket_arn, artifacts_bucket_arn - Gold data and Athena results buckets
 #   inference_lambda_arn, inference_lambda_name - forecast/anomaly Lambda (modules/ml)
+#   embedding_model_id              - Bedrock embedding model for the Knowledge Base
 
 variable "name_prefix" {
   description = "Prefix for resource names"
@@ -45,4 +46,10 @@ variable "inference_lambda_arn" {
 variable "inference_lambda_name" {
   description = "Name of the forecast/anomaly Lambda"
   type        = string
+}
+
+variable "embedding_model_id" {
+  description = "Bedrock embedding model for the Knowledge Base (1024 dimensions)"
+  type        = string
+  default     = "amazon.titan-embed-text-v2:0"
 }

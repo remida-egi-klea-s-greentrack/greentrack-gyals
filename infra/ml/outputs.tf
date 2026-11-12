@@ -40,3 +40,18 @@ output "inference_lambda_arn" {
   description = "ARN of the forecast/anomaly Lambda"
   value       = module.ml.inference_lambda_arn
 }
+
+output "pipeline_name" {
+  description = "SageMaker forecast pipeline"
+  value       = module.ml.pipeline_name
+}
+
+output "model_package_group" {
+  description = "Model Registry group of the forecast model"
+  value       = module.ml.model_package_group
+}
+
+output "github_pipeline_role_arn" {
+  description = "Role for the ML pipeline workflow (store as the ML_PIPELINE_ROLE_ARN repository secret)"
+  value       = module.ml.github_pipeline_role_arn
+}
