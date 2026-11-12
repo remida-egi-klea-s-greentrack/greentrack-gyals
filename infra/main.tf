@@ -11,7 +11,7 @@ module "dynamodb" {
       hash_key  = "household_id"
       range_key = "timestamp"
     }
-    
+
     # ML Integration: Tabela per forecast results nga g2-greentrack-ml-inference Lambda
     # Partition key: household_id (identifier i household)
     # Sort key: timestamp (koha e prediction)
@@ -20,7 +20,7 @@ module "dynamodb" {
       hash_key  = "household_id"
       range_key = "timestamp"
     }
-    
+
     # ML Integration: Tabela per anomaly detections nga 2 detectors (log-MAD dhe RCF)
     # Partition key: household_id (identifier i household)
     # Sort key: timestamp_detector (format: "2010-01-24T17:00:00#rcf_raw_24")
