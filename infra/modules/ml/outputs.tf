@@ -56,3 +56,18 @@ output "artifacts_bucket_arn" {
   description = "ARN of the bucket holding Athena results"
   value       = data.aws_s3_bucket.artifacts.arn
 }
+
+output "pipeline_name" {
+  description = "SageMaker forecast pipeline"
+  value       = aws_sagemaker_pipeline.forecast.pipeline_name
+}
+
+output "model_package_group" {
+  description = "Model Registry group of the forecast model"
+  value       = aws_sagemaker_model_package_group.forecast.model_package_group_name
+}
+
+output "github_pipeline_role_arn" {
+  description = "Role the GitHub Actions workflow assumes to start the pipeline"
+  value       = aws_iam_role.github_pipeline.arn
+}
