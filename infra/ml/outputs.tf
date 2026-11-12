@@ -25,3 +25,18 @@ output "params_uri" {
   description = "S3 location of the detector parameters (written by ml.inference.calibrate)"
   value       = module.ml.params_uri
 }
+
+output "assistant_lambda_name" {
+  description = "Lambda behind /chat and the weekly report"
+  value       = module.genai.assistant_lambda_name
+}
+
+output "assistant_lambda_arn" {
+  description = "ARN of the assistant Lambda"
+  value       = module.genai.assistant_lambda_arn
+}
+
+output "inference_lambda_arn" {
+  description = "ARN of the forecast/anomaly Lambda"
+  value       = module.ml.inference_lambda_arn
+}
