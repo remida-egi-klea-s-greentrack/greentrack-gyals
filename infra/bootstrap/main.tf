@@ -1,56 +1,53 @@
 /**
- * Bootstrap infrastructure for Terraform state management
+ * Bootstrap infrastructure for Terraform remote state management
  * 
- * This creates the S3 bucket and DynamoDB table needed for remote state.
- * Run this ONCE before applying main infrastructure:
- *   cd bootstrap
+ * Enhanced version with:
+ * - S3 native locking (Terraform 1.10+, no DynamoDB needed)
+ * - prevent_destroy lifecycle for safety
+ * - Multi-environment support
+ * - Account ID in bucket name for global uniqueness
+ * 
+ * Usage:
+ *   cd infra/bootstrap
  *   terraform init
- *   terraform apply -var="group_prefix=g2"
+ *   terraform apply -var-file=production.tfvars
+ * 
+ * Based on: APP-06 with enhancements for APP-07
  */
 
-variable "group_prefix" {
-  description = "Group prefix (g1, g2, g3, or g4)"
-  type        = string
+# Get current AWS account ID for unique bucket naming
+data "aws_caller_identity" "current" {}
 
-  validation {
-    condition     = can(regex("^g[1-4]$", var.group_prefix))
-    error_message = "Group prefix must be g1, g2, g3, or g4."
-  }
-}
+provider "aws" {
+  region = var.aws_region
 
-variable "aws_region" {
-  description = "AWS region"
-  type        = string
-  default     = "eu-central-1"
-}
-
-terraform {
-  required_version = ">= 1.5.0"
-
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
+  default_tags {
+    tags = {
+      Project     = var.project_name
+      Group       = var.group_prefix
+      Environment = var.environment
+      ManagedBy   = "terraform"
+      Purpose     = "terraform-state"
     }
   }
 }
 
-provider "aws" {
-  region = var.aws_region
-}
-
 # S3 bucket for Terraform state
+# Bucket name includes account ID to ensure global uniqueness
 resource "aws_s3_bucket" "terraform_state" {
-  bucket = "${var.group_prefix}-greentrack-terraform-state"
+  bucket = "${var.group_prefix}-${var.project_name}-tfstate-${data.aws_caller_identity.current.account_id}"
+
+  # Prevent accidental deletion of the state bucket
+  lifecycle {
+    prevent_destroy = true
+  }
 
   tags = {
-    Name      = "${var.group_prefix}-greentrack-terraform-state"
-    Purpose   = "Terraform State Storage"
-    Project   = "GreenTrack"
-    ManagedBy = "Terraform Bootstrap"
+    Name = "${var.group_prefix}-${var.project_name}-terraform-state"
   }
 }
 
+# Enable versioning for state history and rollback capability
 resource "aws_s3_bucket_versioning" "terraform_state" {
   bucket = aws_s3_bucket.terraform_state.id
 
@@ -59,6 +56,8 @@ resource "aws_s3_bucket_versioning" "terraform_state" {
   }
 }
 
+# Server-side encryption using S3-managed keys (SSE-S3)
+# No KMS key needed, lower cost
 resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state" {
   bucket = aws_s3_bucket.terraform_state.id
 
@@ -69,6 +68,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state" 
   }
 }
 
+# Block all public access to the state bucket
 resource "aws_s3_bucket_public_access_block" "terraform_state" {
   bucket = aws_s3_bucket.terraform_state.id
 
@@ -78,42 +78,13 @@ resource "aws_s3_bucket_public_access_block" "terraform_state" {
   restrict_public_buckets = true
 }
 
-# DynamoDB table for state locking
-resource "aws_dynamodb_table" "terraform_locks" {
-  name         = "${var.group_prefix}-greentrack-terraform-locks"
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "LockID"
-
-  attribute {
-    name = "LockID"
-    type = "S"
-  }
-
-  tags = {
-    Name      = "${var.group_prefix}-greentrack-terraform-locks"
-    Purpose   = "Terraform State Locking"
-    Project   = "GreenTrack"
-    ManagedBy = "Terraform Bootstrap"
-  }
-}
-
-output "s3_bucket_name" {
-  description = "Name of the S3 bucket for Terraform state"
-  value       = aws_s3_bucket.terraform_state.id
-}
-
-output "dynamodb_table_name" {
-  description = "Name of the DynamoDB table for state locking"
-  value       = aws_dynamodb_table.terraform_locks.id
-}
-
-output "backend_config" {
-  description = "Backend configuration for main Terraform"
-  value       = <<-EOT
-    bucket         = "${aws_s3_bucket.terraform_state.id}"
-    key            = "greentrack/terraform.tfstate"
-    region         = "${var.aws_region}"
-    dynamodb_table = "${aws_dynamodb_table.terraform_locks.id}"
-    encrypt        = true
-  EOT
-}
+# NOTE: DynamoDB table removed!
+# Terraform 1.10+ has native S3 locking via 'use_lockfile = true'
+# This eliminates the need for a separate DynamoDB table, reducing cost
+# and simplifying infrastructure.
+#
+# Migration from old DynamoDB-based locking:
+# 1. Upgrade to Terraform 1.10+
+# 2. Update backend config to use 'use_lockfile = true'
+# 3. Remove 'dynamodb_table' parameter from backend config
+# 4. The old DynamoDB table can be safely deleted after migration
