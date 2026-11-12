@@ -1,36 +1,61 @@
 """Loader for gold layer data exported by Developer A."""
 import json
+import os
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List
 
 import pandas as pd
 import numpy as np
+import boto3
+
+
+# S3 bucket dhe paths për gold data (Developer A)
+S3_BUCKET = os.environ.get("DATA_BUCKET", "g2-greentrack-data-886565871385")
+S3_GOLD_PREFIX = "lakehouse/exports/"
 
 
 def get_gold_exports_dir() -> Path:
-    """Returns the path to gold exports directory."""
+    """Returns the path to gold exports directory (for local development)."""
     repo_root = Path(__file__).resolve().parents[2]
     return repo_root / "data" / "lakehouse" / "exports"
 
 
+def load_parquet_from_s3(table_name: str) -> pd.DataFrame:
+    """
+    Load Parquet data from S3.
+    Works both in Lambda (S3) and locally (fallback to local files).
+    """
+    # Try S3 first (for Lambda/AWS environment)
+    try:
+        s3_path = f"s3://{S3_BUCKET}/{S3_GOLD_PREFIX}{table_name}/"
+        df = pd.read_parquet(s3_path)
+        print(f"✅ Loaded {len(df)} rows from S3: {s3_path}")
+        return df
+    except Exception as e:
+        print(f"⚠️  S3 load failed: {e}")
+        
+        # Fallback to local files (for development)
+        local_path = get_gold_exports_dir() / table_name
+        if local_path.exists():
+            df = pd.read_parquet(local_path)
+            print(f"✅ Loaded {len(df)} rows from local: {local_path}")
+            return df
+        else:
+            raise FileNotFoundError(
+                f"Gold data not found in S3 ({s3_path}) or locally ({local_path}). "
+                "Ensure Developer A's pipeline has run."
+            )
+
+
 def load_hourly_consumption(limit: int = 100) -> List[Dict[str, Any]]:
     """
-    Load hourly consumption data from gold layer.
+    Load hourly consumption data from gold layer (S3 or local).
     
     Returns data in the same format as contracts/consumption.json
     """
-    exports_dir = get_gold_exports_dir()
-    parquet_path = exports_dir / "gold_hourly_consumption"
-    
-    if not parquet_path.exists():
-        raise FileNotFoundError(
-            f"Gold data not found at {parquet_path}. "
-            "Run 'python data/jobs/gold_aggregate.py' first."
-        )
-    
-    # Read Parquet file
-    df = pd.read_parquet(parquet_path)
+    # Load from S3 (or local fallback)
+    df = load_parquet_from_s3("gold_hourly_consumption")
     
     # Filter only complete hours
     df = df[df["complete"] == True].copy()
@@ -58,17 +83,10 @@ def load_hourly_consumption(limit: int = 100) -> List[Dict[str, Any]]:
 
 
 def load_daily_consumption() -> List[Dict[str, Any]]:
-    """Load daily consumption aggregates from gold layer."""
-    exports_dir = get_gold_exports_dir()
-    parquet_path = exports_dir / "gold_daily_consumption"
+    """Load daily consumption aggregates from gold layer (S3 or local)."""
+    # Load from S3 (or local fallback)
+    df = load_parquet_from_s3("gold_daily_consumption")
     
-    if not parquet_path.exists():
-        raise FileNotFoundError(
-            f"Gold data not found at {parquet_path}. "
-            "Run 'python data/jobs/gold_aggregate.py' first."
-        )
-    
-    df = pd.read_parquet(parquet_path)
     df = df[df["complete"] == True].copy()
     df = df.sort_values("date", ascending=False).head(30)  # Last 30 days
     
@@ -91,14 +109,12 @@ def detect_anomalies_simple(threshold_kwh: float = 5.0) -> List[Dict[str, Any]]:
     
     In production, this would use Developer B's ML model.
     """
-    exports_dir = get_gold_exports_dir()
-    parquet_path = exports_dir / "gold_hourly_consumption"
-    
-    if not parquet_path.exists():
+    try:
+        df = load_parquet_from_s3("gold_hourly_consumption")
+        df = df[df["complete"] == True].copy()
+    except Exception as e:
+        print(f"⚠️  Could not load gold data for anomalies: {e}")
         return []
-    
-    df = pd.read_parquet(parquet_path)
-    df = df[df["complete"] == True].copy()
     
     # Simple rule: consumption > threshold
     anomalies_df = df[df["global_active_power_kwh"] > threshold_kwh].copy()
