@@ -198,6 +198,7 @@ def test_weekly_report_uses_fixed_tools_and_no_tool_use(athena):
     assert facts["text"].startswith("Facts (JSON): ") and "Write a weekly energy report" in guarded["guardContent"]["text"]["text"]
     # only the short request is guarded; the rules are plain text, so the prompt-attack filter never sees them
     assert len(guarded["guardContent"]["text"]["text"]) < 100 and rules["text"].startswith("Report rules:")
+    assert "2010-11-15 to 2010-11-21." in guarded["guardContent"]["text"]["text"]  # inclusive last day
     assert inference.payloads[0][1] == {"start": "2010-11-15T00:00:00", "end": "2010-11-22T00:00:00"}
 
 
