@@ -1,4 +1,4 @@
-#!C:\Python315\python.exe
+#!C:\Users\A\Desktop\greentrack-gyals\.venv\Scripts\python.exe
 
 import sys
 import json
