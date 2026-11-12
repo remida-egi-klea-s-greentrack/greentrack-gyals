@@ -63,3 +63,9 @@ variable "github_repository" {
   type        = string
   default     = "remida-egi-klea-s-greentrack/greentrack-gyals"
 }
+
+variable "github_oidc_sub_prefix" {
+  description = "Immutable OIDC subject prefix of the repo (GET /repos/{owner}/{repo}/actions/oidc/customization/sub)"
+  type        = string
+  default     = "repo:remida-egi-klea-s-greentrack@351971781/greentrack-gyals@1439962229"
+}
