@@ -66,12 +66,9 @@ resource "aws_iam_role_policy_attachment" "dynamodb" {
   policy_arn = aws_iam_policy.dynamodb_access.arn
 }
 
-data "archive_file" "lambda_package" {
-  type        = "zip"
-  source_dir  = "${path.module}/../../../app"
-  output_path = var.package_path
-  excludes    = ["__pycache__", "*.pyc", ".pytest_cache", "tests"]
-}
+# Lambda package is pre-built using scripts/build-lambda.ps1
+# This avoids Terraform trying to zip the entire app directory
+# which can take a long time and include unnecessary files
 
 resource "aws_lambda_function" "this" {
   for_each         = local.functions
@@ -79,8 +76,8 @@ resource "aws_lambda_function" "this" {
   role             = aws_iam_role.lambda.arn
   runtime          = "python3.11"
   handler          = each.value.handler
-  filename         = data.archive_file.lambda_package.output_path
-  source_code_hash = data.archive_file.lambda_package.output_base64sha256
+  filename         = var.package_path
+  source_code_hash = filebase64sha256(var.package_path)
   timeout          = 15
   memory_size      = 256
 
