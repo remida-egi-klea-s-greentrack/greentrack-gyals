@@ -5,3 +5,5 @@ aws_region   = "eu-central-1"
 group_prefix = "g2"  # Change to your group (g1, g2, g3, or g4)
 environment  = "production"
 project_name = "greentrack"
+
+# Account ID from AWS access portal: 886565871385

