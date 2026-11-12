@@ -149,7 +149,7 @@ def weekly_report(week_start, bedrock, clients, env):
     }
     # Only the short request is guarded: the rules below are our own text, and their imperative wording
     # trips the guardrail's prompt-attack filter (seen live on 12 Nov 2026).
-    request = f"Write a weekly energy report for {week['start']} to {week['end']} (end exclusive)."
+    request = f"Write a weekly energy report for {week['start']} to {_plus_days(week_start, 6)}."  # both days included
     rules = (
         "Report rules: 5-8 short sentences covering "
         "total and change versus the previous week, busiest day and peak hours, where the energy went (submetering), "
