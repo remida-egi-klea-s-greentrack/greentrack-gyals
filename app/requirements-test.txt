@@ -1,0 +1,4 @@
+# Deps for running app/tests in CI (Lambda runtime itself only needs boto3)
+boto3>=1.28.0
+pandas>=2.0.0
+pytest>=8.0.0

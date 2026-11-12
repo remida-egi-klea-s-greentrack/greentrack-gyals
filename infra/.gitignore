@@ -20,3 +20,7 @@ override.tf.json
 *.swp
 *.swo
 *~
+
+# Terraform plan files (binary, may contain infra details)
+tfplan
+*.tfplan

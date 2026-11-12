@@ -14,7 +14,11 @@ import {
 } from "recharts";
 import "./App.css";
 
-const API = "https://5tto05ko0e.execute-api.eu-central-1.amazonaws.com";
+// VITE_API_URL vendoset në build (CI nga terraform output, lokalisht http://localhost:8080).
+// Pa të, përdoret API-ja e production, si më parë.
+const API =
+  import.meta.env.VITE_API_URL ||
+  "https://5tto05ko0e.execute-api.eu-central-1.amazonaws.com";
 
 function App() {
   const [consumption, setConsumption] = useState({ records: [] });
