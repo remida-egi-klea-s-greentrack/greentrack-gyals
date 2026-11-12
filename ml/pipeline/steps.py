@@ -47,7 +47,8 @@ HOURS_FILE = "hours.csv"
 def hourly_frame(rows):
     """Athena rows (strings) as the Gold hourly frame; incomplete hours get no kWh, as in the contract."""
     frame = pd.DataFrame(rows, columns=["timestamp", "global_active_power_kwh", "complete"])
-    frame["timestamp"] = pd.to_datetime(frame["timestamp"])
+    # Athena adds the zone ("2010-01-24 17:00:00.000 UTC"); Gold hours are naive, as in the inference Lambda.
+    frame["timestamp"] = pd.to_datetime(frame["timestamp"].str[:19])
     frame["complete"] = frame["complete"].str.lower().eq("true")
     kwh = pd.to_numeric(frame["global_active_power_kwh"])
     frame["global_active_power_kwh"] = kwh.where(frame["complete"])
