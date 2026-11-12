@@ -241,3 +241,34 @@ def test_handler_clips_negative_forecasts_and_reports_bad_windows(monkeypatch):
 
     out = run_window(monkeypatch, series(), {"start": "2010-01-02T00:00:00", "end": "2010-01-03T00:00:00"}, FakeRuntime(), params)
     assert "history" in out["error"]
+
+
+# ---------- calibrate ----------
+
+def test_calibrate_matches_the_confirmation_scheme():
+    from ml.inference.calibrate import build_params
+
+    index = pd.date_range("2008-01-01", "2010-03-31 23:00", freq="h")
+    rng = np.random.default_rng(5)
+    s = pd.Series((0.5 + 1.5 * (index.hour >= 18)) * np.exp(rng.normal(0, 0.3, len(index))), index=index)
+    s.loc["2009-06-01 05:00"] = np.nan
+    s.loc["2010-01-15":] = 999.0  # after 2009: must not influence anything
+
+    seen = []
+
+    def score(records):
+        seen.extend(records)
+        return [r[-1] for r in records]
+
+    params = build_params(s, score, {"rcf_endpoint": "x"})
+
+    detector = GlobalLogMADDetector().fit(s.loc[:"2008-12-31 23:00"])
+    expected = np.sort(detector.score(s.loc["2009"])["robust_z"].abs().dropna().to_numpy())
+    np.testing.assert_allclose(params["log_mad"]["reference"], expected)
+    assert params["log_mad"]["medians"][0] == pytest.approx(detector.medians_.loc[0])
+
+    # 2009 windows only, none touching the missing hour; references are sorted.
+    assert len(seen) == len(s.loc["2009"]) - 24
+    assert max(max(r) for r in seen) < 999.0
+    assert params["rcf"]["reference"] == sorted(params["rcf"]["reference"])
+    json.dumps(params)
