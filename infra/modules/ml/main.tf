@@ -1,5 +1,5 @@
 # ML module (Developer B): S3 bucket for training data and model artifacts.
-# SageMaker resources (role, registry, pipeline, endpoint) are added here in later steps.
+# SageMaker execution role: iam.tf. Inference endpoints and Lambda: inference.tf.
 # Variables used: var.name_prefix, var.force_destroy.
 # data.aws_caller_identity.current supplies the account ID that keeps the bucket name unique.
 
