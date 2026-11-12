@@ -154,6 +154,7 @@ data "aws_iam_policy_document" "deploy" {
     sid = "AssistantChatPermissionOnly"
     actions = [
       "lambda:GetFunction", "lambda:GetFunctionConfiguration", "lambda:GetPolicy",
+      "lambda:ListVersionsByFunction", "lambda:GetFunctionCodeSigningConfig", "lambda:ListTags",
       "lambda:AddPermission", "lambda:RemovePermission",
     ]
     resources = [local.assistant]
@@ -179,6 +180,7 @@ data "aws_iam_policy_document" "deploy" {
       "iam:ListInstanceProfilesForRole",
       "iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:CreatePolicy",
       "iam:DeletePolicy", "iam:CreatePolicyVersion", "iam:DeletePolicyVersion", "iam:TagPolicy", "iam:UntagPolicy",
+      "iam:ListPolicyTags", "iam:ListRoleTags",
     ]
     resources = concat(local.role_arns, local.policy_arns)
   }
