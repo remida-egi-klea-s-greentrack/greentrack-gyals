@@ -14,7 +14,7 @@ import {
 } from "recharts";
 import "./App.css";
 
-const API = "";
+const API = "https://5tto05ko0e.execute-api.eu-central-1.amazonaws.com";
 
 function App() {
   const [consumption, setConsumption] = useState({ records: [] });

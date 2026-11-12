@@ -1,4 +1,9 @@
 locals {
+  # NOTE: Këto Lambda functions janë të APP backend (app/backend/*.py)
+  # dhe përdorin fixtures për demo. Pas demo, për ML integration të plotë:
+  # - forecast dhe anomalies duhet të thërrasin g2-greentrack-ml-inference
+  # - chat duhet të thërrasë g2-greentrack-assistant
+  # Por për tani handler-at tanë vazhdojnë të funksionojnë me fixtures.
   functions = {
     consumption = { handler = "app.backend.consumption.handler", method = "GET", path = "/consumption" }
     anomalies   = { handler = "app.backend.anomalies.handler", method = "GET", path = "/anomalies" }
@@ -66,12 +71,9 @@ resource "aws_iam_role_policy_attachment" "dynamodb" {
   policy_arn = aws_iam_policy.dynamodb_access.arn
 }
 
-data "archive_file" "lambda_package" {
-  type        = "zip"
-  source_dir  = "${path.module}/../../../app"
-  output_path = var.package_path
-  excludes    = ["__pycache__", "*.pyc", ".pytest_cache", "tests"]
-}
+# Lambda package is pre-built using scripts/build-lambda.ps1
+# This avoids Terraform trying to zip the entire app directory
+# which can take a long time and include unnecessary files
 
 resource "aws_lambda_function" "this" {
   for_each         = local.functions
@@ -79,8 +81,8 @@ resource "aws_lambda_function" "this" {
   role             = aws_iam_role.lambda.arn
   runtime          = "python3.11"
   handler          = each.value.handler
-  filename         = data.archive_file.lambda_package.output_path
-  source_code_hash = data.archive_file.lambda_package.output_base64sha256
+  filename         = var.package_path
+  source_code_hash = filebase64sha256(var.package_path)
   timeout          = 15
   memory_size      = 256
 
@@ -90,8 +92,11 @@ resource "aws_lambda_function" "this" {
         REGION = "eu-central-1"
       },
       length(local.table_names) > 0 ? {
+        # DynamoDB table names për Lambda environment variables
         DYNAMODB_TABLE_CONSUMPTION = lookup(local.table_names, "consumption", "")
         DYNAMODB_TABLE_ANOMALIES   = lookup(local.table_names, "anomalies", "")
+        # Tabela e re forecasts për ML predictions
+        DYNAMODB_TABLE_FORECASTS = lookup(local.table_names, "forecasts", "")
       } : {}
     )
   }
