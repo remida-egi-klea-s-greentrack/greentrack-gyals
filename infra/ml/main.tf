@@ -27,3 +27,16 @@ module "ml" {
   rcf_image          = var.rcf_image
   rcf_model_data     = var.rcf_model_data
 }
+
+# Bedrock assistant (Challenge 4); reuses names from the ML module.
+module "genai" {
+  source      = "../modules/genai"
+  name_prefix = var.name_prefix
+
+  gold_database         = module.ml.gold_database
+  athena_workgroup      = module.ml.athena_workgroup
+  gold_bucket_arn       = module.ml.gold_bucket_arn
+  artifacts_bucket_arn  = module.ml.artifacts_bucket_arn
+  inference_lambda_arn  = module.ml.inference_lambda_arn
+  inference_lambda_name = module.ml.inference_lambda_name
+}

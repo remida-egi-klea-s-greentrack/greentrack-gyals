@@ -4,12 +4,16 @@ Variables:
     QUERY            - read-only SELECT on the Gold hourly table; only columns we need, bounded by time
     POLL_SECONDS     - wait between Athena status checks
     BATCH_SIZE       - records per InvokeEndpoint call (far below the 4 MB serverless payload limit)
+    RETRY_WAITS      - seconds to wait before each retry of a ModelError (a serverless container being replaced
+                       answers with ModelError; botocore does not retry it)
     athena, runtime, s3 - boto3 clients (stubbed in tests)
 """
 
 import json
 import time
 from datetime import datetime
+
+from botocore.exceptions import ClientError
 
 QUERY = (
     'SELECT "timestamp", global_active_power_kwh, complete '
@@ -20,17 +24,15 @@ QUERY = (
 )
 POLL_SECONDS = 0.5
 BATCH_SIZE = 500
+RETRY_WAITS = (2, 5)
 
 
-def query_hours(athena, database, workgroup, start, end, timeout_seconds=60, sleep=time.sleep):
-    """{hour: kWh or None} for [start, end); incomplete hours map to None.
+def run_query(athena, sql, workgroup, timeout_seconds=60, sleep=time.sleep):
+    """Rows of a read-only Athena query as lists of strings (None for NULL), header row removed.
 
-    start/end are validated datetimes, so formatting them into the SQL cannot inject anything.
     The query is cancelled if it does not finish within timeout_seconds.
     """
-    query_id = athena.start_query_execution(
-        QueryString=QUERY.format(database=database, start=start, end=end), WorkGroup=workgroup,
-    )["QueryExecutionId"]
+    query_id = athena.start_query_execution(QueryString=sql, WorkGroup=workgroup)["QueryExecutionId"]
 
     waited = 0.0
     while True:
@@ -45,18 +47,28 @@ def query_hours(athena, database, workgroup, start, end, timeout_seconds=60, sle
         sleep(POLL_SECONDS)
         waited += POLL_SECONDS
 
-    hours, token, first_page = {}, None, True
+    rows, token, first_page = [], None, True
     while True:
         page = athena.get_query_results(QueryExecutionId=query_id, **({"NextToken": token} if token else {}))
-        rows = page["ResultSet"]["Rows"]
-        for row in rows[1:] if first_page else rows:  # first row of the first page is the header
-            stamp, kwh, complete = (cell.get("VarCharValue") for cell in row["Data"])
-            hour = datetime.fromisoformat(stamp[:19])
-            hours[hour] = float(kwh) if complete == "true" and kwh is not None else None
+        page_rows = page["ResultSet"]["Rows"]
+        for row in page_rows[1:] if first_page else page_rows:  # first row of the first page is the header
+            rows.append([cell.get("VarCharValue") for cell in row["Data"]])
         first_page = False
         token = page.get("NextToken")
         if not token:
-            return hours
+            return rows
+
+
+def query_hours(athena, database, workgroup, start, end, timeout_seconds=60, sleep=time.sleep):
+    """{hour: kWh or None} for [start, end); incomplete hours map to None.
+
+    start/end are validated datetimes, so formatting them into the SQL cannot inject anything.
+    """
+    sql = QUERY.format(database=database, start=start, end=end)
+    hours = {}
+    for stamp, kwh, complete in run_query(athena, sql, workgroup, timeout_seconds, sleep):
+        hours[datetime.fromisoformat(stamp[:19])] = float(kwh) if complete == "true" and kwh is not None else None
+    return hours
 
 
 def _csv(rows):
@@ -64,13 +76,24 @@ def _csv(rows):
     return "\n".join(",".join("" if v is None else repr(float(v)) for v in row) for row in rows)
 
 
+def _invoke(runtime, **request):
+    """invoke_endpoint, retried on ModelError (then the last error is raised)."""
+    for wait in (*RETRY_WAITS, None):
+        try:
+            return runtime.invoke_endpoint(**request)
+        except ClientError as error:
+            if error.response.get("Error", {}).get("Code") != "ModelError" or wait is None:
+                raise
+            time.sleep(wait)
+
+
 def predict_xgboost(runtime, endpoint, rows):
     """Predicted kWh per feature row (built-in XGBoost, text/csv in and out)."""
     out = []
     for i in range(0, len(rows), BATCH_SIZE):
         chunk = rows[i:i + BATCH_SIZE]
-        body = runtime.invoke_endpoint(
-            EndpointName=endpoint, ContentType="text/csv", Accept="text/csv", Body=_csv(chunk),
+        body = _invoke(
+            runtime, EndpointName=endpoint, ContentType="text/csv", Accept="text/csv", Body=_csv(chunk),
         )["Body"].read().decode()
         # The container separates predictions with commas or newlines depending on version.
         values = [float(v) for v in body.replace("\n", ",").split(",") if v.strip()]
@@ -86,8 +109,8 @@ def score_rcf(runtime, endpoint, records):
     for i in range(0, len(records), BATCH_SIZE):
         chunk = records[i:i + BATCH_SIZE]
         body = "\n".join(",".join(f"{v:.6f}" for v in row) for row in chunk)
-        response = runtime.invoke_endpoint(
-            EndpointName=endpoint, ContentType="text/csv", Accept="application/json", Body=body,
+        response = _invoke(
+            runtime, EndpointName=endpoint, ContentType="text/csv", Accept="application/json", Body=body,
         )
         scores = [item["score"] for item in json.loads(response["Body"].read())["scores"]]
         if len(scores) != len(chunk):

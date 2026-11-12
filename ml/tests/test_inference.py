@@ -13,6 +13,7 @@ import boto3
 import numpy as np
 import pandas as pd
 import pytest
+from botocore.exceptions import ClientError
 from botocore.stub import Stubber
 
 from ml.anomaly.global_log_mad import GlobalLogMADDetector
@@ -186,6 +187,36 @@ def test_xgboost_body_keeps_missing_values_empty():
     runtime = FakeRuntime()
     assert aws.predict_xgboost(runtime, "xgb", [[1, 2, 3, None, 0.5, None]]) == [1.0]
     assert runtime.calls[0][1] == "1.0,2.0,3.0,,0.5,"
+
+
+class FlakyRuntime(FakeRuntime):
+    """Fails the first `failures` calls with the given error code, then answers like FakeRuntime."""
+
+    def __init__(self, failures, code="ModelError"):
+        super().__init__()
+        self.failures, self.code, self.attempts = failures, code, 0
+
+    def invoke_endpoint(self, **request):
+        self.attempts += 1
+        if self.attempts <= self.failures:
+            raise ClientError({"Error": {"Code": self.code, "Message": "no response"}}, "InvokeEndpoint")
+        return super().invoke_endpoint(**request)
+
+
+def test_model_error_is_retried_then_raised(monkeypatch):
+    monkeypatch.setattr(aws, "RETRY_WAITS", (0, 0))
+    runtime = FlakyRuntime(failures=2)
+    assert aws.predict_xgboost(runtime, "xgb", [[1.0]]) == [1.0] and runtime.attempts == 3
+    with pytest.raises(ClientError):
+        aws.score_rcf(FlakyRuntime(failures=3), "rcf", [[0.0] * 24])
+
+
+def test_other_errors_are_not_retried(monkeypatch):
+    monkeypatch.setattr(aws, "RETRY_WAITS", (0, 0))
+    runtime = FlakyRuntime(failures=1, code="ValidationError")
+    with pytest.raises(ClientError):
+        aws.predict_xgboost(runtime, "xgb", [[1.0]])
+    assert runtime.attempts == 1
 
 
 # ---------- whole request ----------

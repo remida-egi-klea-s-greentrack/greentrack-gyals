@@ -30,3 +30,29 @@ output "params_uri" {
   description = "Where the calibrate command writes the detector parameters"
   value       = "s3://${aws_s3_bucket.ml.bucket}/${local.params_key}"
 }
+
+# Names the assistant (modules/genai) reuses.
+output "inference_lambda_arn" {
+  description = "ARN of the inference Lambda"
+  value       = aws_lambda_function.inference.arn
+}
+
+output "gold_database" {
+  description = "Glue database of the Gold tables"
+  value       = local.gold_database
+}
+
+output "athena_workgroup" {
+  description = "Athena workgroup with the enforced results location"
+  value       = local.athena_workgroup
+}
+
+output "gold_bucket_arn" {
+  description = "ARN of the Gold bucket"
+  value       = data.aws_s3_bucket.gold.arn
+}
+
+output "artifacts_bucket_arn" {
+  description = "ARN of the bucket holding Athena results"
+  value       = data.aws_s3_bucket.artifacts.arn
+}
