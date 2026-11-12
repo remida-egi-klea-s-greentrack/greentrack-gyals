@@ -57,3 +57,9 @@ variable "serverless_max_concurrency" {
   type        = number
   default     = 2
 }
+
+variable "github_repository" {
+  description = "owner/repo whose main-branch workflows may start the forecast pipeline"
+  type        = string
+  default     = "remida-egi-klea-s-greentrack/greentrack-gyals"
+}
