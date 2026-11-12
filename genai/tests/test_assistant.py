@@ -66,7 +66,50 @@ def test_every_sql_tool_is_read_only_and_bounded():
 
 
 def test_every_tool_has_a_spec():
-    assert {spec["toolSpec"]["name"] for spec in tools.SPECS} == set(tools.QUERIES) | {"forecast_and_anomalies"}
+    assert {spec["toolSpec"]["name"] for spec in tools.SPECS} == set(tools.QUERIES) | {
+        "forecast_and_anomalies", "energy_saving_advice"}
+
+
+class FakeKnowledgeBase:
+    """bedrock-agent-runtime stand-in: records retrieve() calls and returns two passages from one document."""
+
+    def __init__(self):
+        self.calls = []
+
+    def retrieve(self, **kwargs):
+        self.calls.append(kwargs)
+        doc = {"location": {"s3Location": {"uri": "s3://b/knowledge-base/energy-guidance/laundry.md"}},
+               "metadata": {"title": "Laundry", "source_url": "https://example.org/laundry"}}
+        return {"retrievalResults": [{**doc, "content": {"text": "Wash in cold water."}},
+                                     {**doc, "content": {"text": "Wash full loads."}}]}
+
+
+def test_advice_tool_returns_passages_and_unique_documents():
+    kb = FakeKnowledgeBase()
+    out = tools.run_tool("energy_saving_advice", {"query": "laundry"}, {"bedrock_agent": kb}, {"KNOWLEDGE_BASE_ID": "KB1"})
+    assert kb.calls[0]["knowledgeBaseId"] == "KB1" and kb.calls[0]["retrievalQuery"] == {"text": "laundry"}
+    assert out["source"] == tools.KB_SOURCE
+    assert [p["text"] for p in out["passages"]] == ["Wash in cold water.", "Wash full loads."]
+    assert out["documents"] == ["Laundry (https://example.org/laundry)"]
+
+
+@pytest.mark.parametrize("args, env, error", [
+    ({}, {"KNOWLEDGE_BASE_ID": "KB1"}, ValueError),
+    ({"query": "  "}, {"KNOWLEDGE_BASE_ID": "KB1"}, ValueError),
+    ({"query": "x" * 301}, {"KNOWLEDGE_BASE_ID": "KB1"}, ValueError),
+    ({"query": "laundry"}, {}, RuntimeError),
+])
+def test_advice_tool_rejects_bad_input_and_missing_config(args, env, error):
+    with pytest.raises(error):
+        tools.run_tool("energy_saving_advice", args, {"bedrock_agent": FakeKnowledgeBase()}, env)
+
+
+def test_advice_answer_cites_the_documents():
+    bedrock = FakeBedrock([tool_use("energy_saving_advice", {"query": "laundry"}), final("Use cold water (Laundry).")])
+    out = agent.answer("How can I save energy on laundry?", bedrock, {"bedrock_agent": FakeKnowledgeBase()},
+                       {**ENV, "KNOWLEDGE_BASE_ID": "KB1"})
+    assert out["citations"] == ["Laundry (https://example.org/laundry)"]
+    assert out["tools_used"] == ["energy_saving_advice"]
 
 
 @pytest.mark.parametrize("name, args, message", [
@@ -151,9 +194,29 @@ def test_weekly_report_uses_fixed_tools_and_no_tool_use(athena):
     assert out["citations"] == ["gold_hourly_consumption", "ml-inference"]
     assert len(athena) == 5 and "TIMESTAMP '2010-11-08 00:00:00'" in athena[1]  # previous week
     assert "toolConfig" not in bedrock.requests[0]
-    facts, guarded = bedrock.requests[0]["messages"][0]["content"]
+    facts, guarded, rules = bedrock.requests[0]["messages"][0]["content"]
     assert facts["text"].startswith("Facts (JSON): ") and "Write a weekly energy report" in guarded["guardContent"]["text"]["text"]
+    # only the short request is guarded; the rules are plain text, so the prompt-attack filter never sees them
+    assert len(guarded["guardContent"]["text"]["text"]) < 100 and rules["text"].startswith("Report rules:")
     assert inference.payloads[0][1] == {"start": "2010-11-15T00:00:00", "end": "2010-11-22T00:00:00"}
+
+
+def test_forecast_vs_actual_uses_only_complete_fully_forecast_days():
+    forecast = {"forecast_kwh": [[f"2010-11-15T{h:02d}:00:00", 1.0] for h in range(24)]
+                + [["2010-11-16T00:00:00", 1.0]]}
+    daily = {"rows": [["2010-11-15", "24", "20.5"], ["2010-11-16", "24", "30.0"], ["2010-11-17", "20", "18.0"]]}
+    out = agent.forecast_vs_actual(daily, forecast)
+    assert out == {"days": [{"day": "2010-11-15", "forecast_kwh": 24.0, "actual_kwh": 20.5, "error_kwh": 3.5}],
+                   "mean_abs_daily_error_kwh": 3.5}
+    assert agent.forecast_vs_actual({"rows": []}, {"forecast_kwh": []})["mean_abs_daily_error_kwh"] is None
+
+
+def test_submetering_shares_are_sorted_largest_first():
+    sub = {"columns": tools.COLUMNS["submetering_breakdown"], "rows": [["186.0", "8.8", "9.6", "63.4", "104.3", "168"]]}
+    shares = agent.submetering_shares(sub)
+    assert [p["part"] for p in shares] == ["other (no sub-meter)", "water heater and AC", "laundry", "kitchen"]
+    assert shares[0] == {"part": "other (no sub-meter)", "kwh": 104.3, "percent": 56}
+    assert agent.submetering_shares({"columns": tools.COLUMNS["submetering_breakdown"], "rows": []}) == []
 
 
 # ---------- handler ----------
