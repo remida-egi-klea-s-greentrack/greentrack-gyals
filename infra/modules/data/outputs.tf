@@ -22,3 +22,9 @@ output "athena_workgroup" {
   description = "Athena workgroup for SQL queries on the tables"
   value       = aws_athena_workgroup.this.name
 }
+
+
+output "state_machine_arn" {
+  description = "Step Functions state machine that runs bronze -> silver -> gold"
+  value       = aws_sfn_state_machine.pipeline.arn
+}
