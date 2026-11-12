@@ -15,3 +15,18 @@ output "sagemaker_role_arn" {
   description = "Execution role for SageMaker processing, training and endpoints"
   value       = aws_iam_role.sagemaker.arn
 }
+
+output "inference_lambda_name" {
+  description = "Lambda that returns a forecast and anomaly scores for a time window"
+  value       = aws_lambda_function.inference.function_name
+}
+
+output "endpoint_names" {
+  description = "Serverless endpoint names (exist only when enable_endpoints = true)"
+  value       = local.endpoint_names
+}
+
+output "params_uri" {
+  description = "Where the calibrate command writes the detector parameters"
+  value       = "s3://${aws_s3_bucket.ml.bucket}/${local.params_key}"
+}
