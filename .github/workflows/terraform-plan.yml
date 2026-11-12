@@ -1,84 +1,77 @@
 name: Terraform Plan
 
+# Plan i app stack (production) për çdo PR që prek infra ose kodin e Lambda-ve.
+# Përdor rolin read-only g2-greentrack-github-plan (OIDC) dhe -lock=false, pra nuk ndryshon asgjë.
+
 on:
   pull_request:
     paths:
-      - 'infra/**'
-      - '.github/workflows/terraform-plan.yml'
+      - "infra/**"
+      - "app/**"
+      - "fixtures/**"
+      - ".github/workflows/terraform-plan.yml"
 
-# TODO: Add OIDC permissions when AWS access is configured
-# permissions:
-#   id-token: write
-#   contents: read
-#   pull-requests: write
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-central-1
+  PLAN_ROLE_ARN: arn:aws:iam::886565871385:role/g2-greentrack-github-plan
+  TF_VAR_environment: production
+  TF_VAR_default_tags: '{"Project":"GreenTrack","ManagedBy":"Terraform","Environment":"production","Team":"Group2"}'
 
 jobs:
-  terraform-plan:
+  plan:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: infra
-    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: actions/setup-python@v5
         with:
-          terraform_version: 1.5.0
+          python-version: "3.11"
 
-      # TODO: Configure AWS credentials with OIDC
-      # - name: Configure AWS credentials
-      #   uses: aws-actions/configure-aws-credentials@v4
-      #   with:
-      #     role-to-assume: arn:aws:iam::ACCOUNT_ID:role/github-actions-terraform
-      #     aws-region: eu-central-1
+      - name: Build Lambda package
+        run: python infra/build/create_lambda_zip.py
 
-      - name: Terraform Format Check
-        run: terraform fmt -check -recursive
-        continue-on-error: true
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.6
 
-      - name: Terraform Init
+      - name: Configure AWS credentials (OIDC, read-only)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.PLAN_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform init
+        working-directory: infra
         run: |
-          # TODO: Add backend config when AWS access is available
-          # terraform init -backend-config=backend.hcl
-          terraform init -backend=false
+          terraform init -input=false \
+            -backend-config="bucket=g2-greentrack-tfstate-886565871385" \
+            -backend-config="key=greentrack/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
 
-      - name: Terraform Validate
-        run: terraform validate
+      - name: Terraform validate
+        working-directory: infra
+        run: terraform validate -no-color
 
-      # TODO: Enable when AWS backend is configured
-      # - name: Terraform Plan
-      #   run: terraform plan -var-file=terraform.tfvars -no-color
-      #   continue-on-error: true
-      #
-      # - name: Comment PR with Plan
-      #   uses: actions/github-script@v7
-      #   if: github.event_name == 'pull_request'
-      #   with:
-      #     script: |
-      #       const output = `#### Terraform Plan 📖
-      #       
-      #       \`\`\`
-      #       ${{ steps.plan.outputs.stdout }}
-      #       \`\`\`
-      #       
-      #       *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
-      #       
-      #       github.rest.issues.createComment({
-      #         issue_number: context.issue.number,
-      #         owner: context.repo.owner,
-      #         repo: context.repo.repo,
-      #         body: output
-      #       })
-
-      - name: Placeholder - AWS Configuration Needed
+      - name: Terraform plan
+        id: plan
+        working-directory: infra
         run: |
-          echo "⚠️  Terraform plan requires AWS credentials"
-          echo "📋 Next steps:"
-          echo "  1. Configure OIDC with AWS"
-          echo "  2. Create backend.hcl with state bucket"
-          echo "  3. Uncomment AWS steps in this workflow"
-          echo ""
-          echo "✅ Format and validation checks passed!"
+          set -o pipefail
+          terraform plan -input=false -no-color -lock=false | tee plan.txt
+
+      - name: Plan summary
+        if: always()
+        working-directory: infra
+        run: |
+          {
+            echo "## Terraform plan (production)"
+            echo '```'
+            grep -E '^\s*# |^Plan:|^No changes' plan.txt || echo "plan.txt missing"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

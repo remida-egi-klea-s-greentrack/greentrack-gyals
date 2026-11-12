@@ -199,7 +199,9 @@ resource "aws_apigatewayv2_route" "chat" {
 }
 
 resource "aws_lambda_permission" "chat" {
-  statement_id  = "AllowGreenTrackApiInvokeChat"
+  # Production ruan id-në origjinale (pa replace); stack-et e tjera (p.sh. e2e) marrin id unike,
+  # që të mos përplasen në policy-n e të njëjtit assistant Lambda.
+  statement_id  = var.name_prefix == "g2-greentrack-production" ? "AllowGreenTrackApiInvokeChat" : "AllowApiInvokeChat-${var.name_prefix}"
   action        = "lambda:InvokeFunction"
   function_name = data.aws_lambda_function.assistant.function_name
   principal     = "apigateway.amazonaws.com"

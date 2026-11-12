@@ -1,12 +1,14 @@
 import json
+import os
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import parse_qsl
 
 from app.backend.anomalies import handler as anomalies_handler
 from app.backend.chat import handler as chat_handler
 from app.backend.consumption import handler as consumption_handler
 from app.backend.forecast import handler as forecast_handler
 
-PORT = 8080
+PORT = int(os.environ.get("PORT", "8080"))
 
 # Çdo adresë lidhet me handler-in e vet
 ROUTES = {
@@ -31,7 +33,7 @@ class ApiRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _handle(self, method):
-        path = self.path.split("?")[0]
+        path, _, query = self.path.partition("?")
         route = ROUTES.get((method, path))
         if route is None:
             self._send(404, json.dumps({"error": "Not found"}))
@@ -41,7 +43,12 @@ class ApiRequestHandler(BaseHTTPRequestHandler):
         body = self.rfile.read(length).decode("utf-8") if length else None
 
         # Formë e thjeshtuar e ngjarjes që AWS Lambda i jep handler-it
-        event = {"httpMethod": method, "path": path, "body": body}
+        event = {
+            "httpMethod": method,
+            "path": path,
+            "body": body,
+            "queryStringParameters": dict(parse_qsl(query)) or None,
+        }
         result = route(event, None)
         self._send(result["statusCode"], result["body"])
 
