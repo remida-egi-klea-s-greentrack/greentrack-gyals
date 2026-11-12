@@ -1,14 +1,12 @@
 locals {
-  # NOTE: Këto Lambda functions janë të APP backend (app/backend/*.py)
-  # dhe përdorin fixtures për demo. Pas demo, për ML integration të plotë:
-  # - forecast dhe anomalies duhet të thërrasin g2-greentrack-ml-inference
-  # - chat duhet të thërrasë g2-greentrack-assistant
-  # Por për tani handler-at tanë vazhdojnë të funksionojnë me fixtures.
+  # Lambda-t e APP backend (app/backend/*.py):
+  # - consumption lexon gold CSV nga S3
+  # - forecast dhe anomalies lexojnë rezultatet ML nga DynamoDB (fallback te fixtures)
+  # /chat shkon direkt te Lambda e assistant-it (GenAI), shih më poshtë.
   functions = {
     consumption = { handler = "app.backend.consumption.handler", method = "GET", path = "/consumption" }
     anomalies   = { handler = "app.backend.anomalies.handler", method = "GET", path = "/anomalies" }
     forecast    = { handler = "app.backend.forecast.handler", method = "GET", path = "/forecast" }
-    chat        = { handler = "app.backend.chat.handler", method = "POST", path = "/chat" }
   }
 
   # Extract table names from ARNs
@@ -121,9 +119,10 @@ resource "aws_lambda_function" "this" {
   environment {
     variables = merge(
       {
-        REGION      = "eu-central-1"
-        GOLD_BUCKET = "g2-greentrack-gold-886565871385" # Gold CSV exports (Developer A)
-        GOLD_PREFIX = "exports/"
+        REGION       = "eu-central-1"
+        HOUSEHOLD_ID = var.household_id
+        GOLD_BUCKET  = "g2-greentrack-gold-886565871385" # Gold CSV exports (Developer A)
+        GOLD_PREFIX  = "exports/"
       },
       length(local.table_names) > 0 ? {
         # DynamoDB table names për Lambda environment variables
@@ -175,4 +174,45 @@ resource "aws_lambda_permission" "api" {
   function_name = aws_lambda_function.this[each.key].function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.this.execution_arn}/*/*"
+}
+
+# ---------------------------------------------------------------------------
+# /chat -> g2-greentrack-assistant (Lambda e GenAI, menaxhohet jashtë këtij stack-u)
+# Handler-i i assistant-it kthen vetë statusCode me payload 2.0.
+# ---------------------------------------------------------------------------
+data "aws_lambda_function" "assistant" {
+  function_name = var.assistant_function_name
+}
+
+resource "aws_apigatewayv2_integration" "chat" {
+  api_id                 = aws_apigatewayv2_api.this.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = data.aws_lambda_function.assistant.invoke_arn
+  payload_format_version = "2.0"
+  timeout_milliseconds   = 30000 # assistant-i mund të marrë ~10-15 s
+}
+
+resource "aws_apigatewayv2_route" "chat" {
+  api_id    = aws_apigatewayv2_api.this.id
+  route_key = "POST /chat"
+  target    = "integrations/${aws_apigatewayv2_integration.chat.id}"
+}
+
+resource "aws_lambda_permission" "chat" {
+  statement_id  = "AllowGreenTrackApiInvokeChat"
+  action        = "lambda:InvokeFunction"
+  function_name = data.aws_lambda_function.assistant.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.this.execution_arn}/*/POST/chat"
+}
+
+# Route dhe integration ekzistuese ripërdoren (update në vend, pa downtime / konflikt route_key)
+moved {
+  from = aws_apigatewayv2_route.this["chat"]
+  to   = aws_apigatewayv2_route.chat
+}
+
+moved {
+  from = aws_apigatewayv2_integration.this["chat"]
+  to   = aws_apigatewayv2_integration.chat
 }
