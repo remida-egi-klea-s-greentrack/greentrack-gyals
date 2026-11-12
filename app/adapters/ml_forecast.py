@@ -77,7 +77,7 @@ def generate_forecast(horizon_hours: int = 24) -> List[Dict[str, Any]]:
         
     except Exception as e:
         # If ML model fails, return empty predictions with error info
-        print(f"⚠️  Forecast generation failed: {e}")
+        print(f"WARN forecast generation failed: {e}")
         return []
 
 

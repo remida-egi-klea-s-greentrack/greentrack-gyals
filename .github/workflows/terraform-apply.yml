@@ -1,102 +1,112 @@
 name: Terraform Apply
 
-# DISABLED: This workflow is in draft mode and requires AWS access
-# To enable: Remove the 'if: false' condition and configure AWS credentials
+# Apply i app stack në production pas merge në main, pastaj smoke test end-to-end.
+# Job-i përdor environment "production" (mund të kërkojë aprovim në GitHub Settings > Environments).
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
-      - 'infra/**'
-      - '.github/workflows/terraform-apply.yml'
-  workflow_dispatch:  # Manual trigger
+      - "infra/**"
+      - "!infra/github-oidc/**"
+      - "app/**"
+      - "!app/frontend/**"
+      - "fixtures/**"
+      - ".github/workflows/terraform-apply.yml"
+  workflow_dispatch:
 
-# TODO: Add OIDC permissions when AWS access is configured
-# permissions:
-#   id-token: write
-#   contents: read
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: terraform-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-central-1
+  DEPLOY_ROLE_ARN: arn:aws:iam::886565871385:role/g2-greentrack-github-deploy
+  TF_VAR_environment: production
+  TF_VAR_default_tags: '{"Project":"GreenTrack","ManagedBy":"Terraform","Environment":"production","Team":"Group2"}'
 
 jobs:
-  terraform-apply:
+  apply:
     runs-on: ubuntu-latest
-    if: false  # DISABLED - Remove this line when AWS is configured
-    environment: production  # Requires approval in GitHub settings
-    defaults:
-      run:
-        working-directory: infra
-    
+    environment: production
+    outputs:
+      api_url: ${{ steps.out.outputs.api_url }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: actions/setup-python@v5
         with:
-          terraform_version: 1.5.0
+          python-version: "3.11"
 
-      # TODO: Configure AWS credentials with OIDC
-      # - name: Configure AWS credentials
-      #   uses: aws-actions/configure-aws-credentials@v4
-      #   with:
-      #     role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-      #     aws-region: eu-central-1
+      - name: Build Lambda package
+        run: python infra/build/create_lambda_zip.py
 
-      # TODO: Build Lambda package
-      # - name: Set up Python
-      #   uses: actions/setup-python@v5
-      #   with:
-      #     python-version: '3.11'
-      #
-      # - name: Build Lambda package
-      #   run: |
-      #     cd ..
-      #     chmod +x scripts/build-lambda.sh
-      #     ./scripts/build-lambda.sh
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.6
+          terraform_wrapper: false
 
-      - name: Terraform Format Check
-        run: terraform fmt -check -recursive
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Terraform Init
+      - name: Terraform init
+        working-directory: infra
         run: |
-          # TODO: Add backend config when AWS access is available
-          # terraform init -backend-config=backend.hcl
-          terraform init -backend=false
+          terraform init -input=false \
+            -backend-config="bucket=g2-greentrack-tfstate-886565871385" \
+            -backend-config="key=greentrack/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
 
-      - name: Terraform Validate
-        run: terraform validate
-
-      # TODO: Enable when AWS backend is configured
-      # - name: Terraform Plan
-      #   run: terraform plan -var-file=terraform.tfvars -out=tfplan
-      #
-      # - name: Terraform Apply
-      #   run: terraform apply -auto-approve tfplan
-      #
-      # - name: Save Outputs
-      #   run: |
-      #     terraform output -json > outputs.json
-      #     echo "API_URL=$(terraform output -raw api_gateway_url)" >> $GITHUB_ENV
-      #     echo "FRONTEND_URL=$(terraform output -raw cloudfront_url)" >> $GITHUB_ENV
-      #
-      # - name: Deployment Summary
-      #   run: |
-      #     echo "✅ Infrastructure deployed successfully!"
-      #     echo ""
-      #     echo "📍 API Gateway: ${{ env.API_URL }}"
-      #     echo "🌐 Frontend: ${{ env.FRONTEND_URL }}"
-      #     echo ""
-      #     echo "Next: Deploy frontend to S3"
-
-      - name: Placeholder - AWS Configuration Needed
+      - name: Terraform plan
+        working-directory: infra
         run: |
-          echo "⚠️  Terraform apply requires AWS credentials and approval"
-          echo "📋 Setup required:"
-          echo "  1. Configure OIDC with AWS"
-          echo "  2. Create 'production' environment in GitHub"
-          echo "  3. Add required secrets:"
-          echo "     - AWS_ROLE_ARN"
-          echo "  4. Create backend.hcl with state bucket"
-          echo "  5. Uncomment deployment steps in this workflow"
-          echo ""
-          echo "✅ Validation checks passed!"
+          set -o pipefail
+          terraform plan -input=false -no-color -out=tfplan | tee plan.txt
+          {
+            echo "## Terraform plan (production)"
+            echo '```'
+            grep -E '^\s*# |^Plan:|^No changes' plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Guard - refuse destroys in production
+        working-directory: infra
+        run: |
+          # Mbrojtje: apply automatik nuk fshin burime. Për fshirje, bëje me dorë dhe me qëllim.
+          if grep -qE 'will be destroyed|must be replaced' plan.txt; then
+            echo "::error::Plan contains destroy/replace - aborting automatic apply."
+            grep -E 'will be destroyed|must be replaced' plan.txt
+            exit 1
+          fi
+
+      - name: Terraform apply
+        working-directory: infra
+        run: terraform apply -input=false -no-color tfplan
+
+      - name: Outputs
+        id: out
+        working-directory: infra
+        run: |
+          echo "api_url=$(terraform output -raw api_gateway_url)" >> "$GITHUB_OUTPUT"
+          echo "API: $(terraform output -raw api_gateway_url)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Frontend: $(terraform output -raw cloudfront_url)" >> "$GITHUB_STEP_SUMMARY"
+
+  smoke-test:
+    needs: apply
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: End-to-end smoke test against production API
+        run: python scripts/smoke_test.py --api-url "${{ needs.apply.outputs.api_url }}" --chat

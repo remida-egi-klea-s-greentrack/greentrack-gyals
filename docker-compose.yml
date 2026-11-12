@@ -1,3 +1,7 @@
+# Demo lokale me një komandë (APP-06):
+#   docker compose up
+# Frontend: http://localhost:5173   API: http://localhost:8080   DynamoDB Local: http://localhost:8000
+# Pa kredenciale AWS, API-ja përdor CSV lokale të gold (nëse ekzistojnë) ose fixtures.
 services:
   dynamodb-local:
     image: amazon/dynamodb-local:latest
@@ -5,3 +9,39 @@ services:
     ports:
       - "8000:8000"
     command: "-jar DynamoDBLocal.jar -inMemory"
+
+  backend:
+    image: python:3.11-slim
+    container_name: greentrack-backend
+    working_dir: /repo
+    volumes:
+      - ./:/repo:ro
+    environment:
+      PYTHONUNBUFFERED: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      AWS_EC2_METADATA_DISABLED: "true" # mos prit për IMDS kur s'ka kredenciale
+      AWS_DEFAULT_REGION: eu-central-1
+      DYNAMODB_ENDPOINT: http://dynamodb-local:8000
+    command: sh -c "pip install -q --root-user-action=ignore boto3 && python -m app.backend.server"
+    ports:
+      - "8080:8080"
+    depends_on:
+      - dynamodb-local
+
+  frontend:
+    image: node:22-slim
+    container_name: greentrack-frontend
+    working_dir: /app
+    volumes:
+      - ./app/frontend:/app
+      - frontend_node_modules:/app/node_modules # mos përziej node_modules të Windows me Linux
+    environment:
+      VITE_API_URL: http://localhost:8080
+    command: sh -c "npm ci --no-audit --no-fund && npm run dev -- --host 0.0.0.0 --port 5173"
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
+volumes:
+  frontend_node_modules:
