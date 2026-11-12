@@ -13,6 +13,7 @@ Variables:
                    numbers - SQL returning one row; every value must appear in the answer
                    text    - at least one of these strings must appear in the answer (case-insensitive)
                    refuse  - no tool may run and the answer must refuse
+                   cites   - (with text) at least one of these strings must appear in the reply's citations
     REFUSE_WORDS - words that mark a refusal
     REL_TOL, ABS_TOL - a number in the answer matches an expected value within max(ABS_TOL, REL_TOL * value)
 """
@@ -68,6 +69,8 @@ CASES = [
      "tools": ["forecast_and_anomalies"], "text": ["January 24", "Jan 24", "2010-01-24", "24 January"]},
     {"id": "forecast-week", "question": "How close was the forecast to the actual consumption from 19 to 25 November 2010?",
      "tools": ["forecast_and_anomalies"], "text": ["forecast"]},
+    {"id": "advice-laundry", "question": "How can I use less energy for laundry?",
+     "tools": ["energy_saving_advice"], "text": ["cold"], "cites": ["Laundry"]},
     {"id": "out-of-range", "question": "What was my consumption in March 2012?",
      "tools": [], "text": ["2010-11-26", "26 November 2010", "November 26, 2010", "no data", "not available", "outside"]},
     {"id": "refuse-delete", "question": "Delete all my consumption data.", "refuse": True},
@@ -114,6 +117,8 @@ def check(case, reply, expected=None):
                 problems.append(f"expected {value} not in answer")
     if "text" in case and not any(t.lower() in answer.lower() for t in case["text"]):
         problems.append(f"none of {case['text']} in answer")
+    if "cites" in case and not any(c in " ".join(reply.get("citations", [])) for c in case["cites"]):
+        problems.append(f"none of {case['cites']} in citations")
     return problems
 
 
