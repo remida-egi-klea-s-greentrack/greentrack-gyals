@@ -127,5 +127,24 @@ class DynamoDBConnectionTest(unittest.TestCase):
         )
 
 
+class SeedDataTest(unittest.TestCase):
+    """Seed script must give DynamoDB Decimal, never float (boto3 rejects float)."""
+
+    def test_fixture_numbers_are_decimal(self):
+        from app.data.seed_tables import load_fixture
+
+        record = load_fixture("consumption.json")["records"][0]
+        self.assertIsInstance(record["global_active_power_kwh"], Decimal)
+
+        def no_floats(value):
+            if isinstance(value, dict):
+                return all(no_floats(v) for v in value.values())
+            if isinstance(value, list):
+                return all(no_floats(v) for v in value)
+            return not isinstance(value, float)
+
+        self.assertTrue(no_floats(load_fixture("anomalies.json")))
+
+
 if __name__ == "__main__":
     unittest.main()
