@@ -9,6 +9,18 @@ variable "github_repository" {
   default     = "remida-egi-klea-s-greentrack/greentrack-gyals"
 }
 
+variable "github_sub_prefixes" {
+  description = <<-EOT
+    Prefikset e claim-it `sub` që pranohen. Repo përdor "immutable subject" (owner@id/repo@id),
+    shih GET /repos/{repo}/actions/oidc/customization/sub; formati klasik mbahet për siguri.
+  EOT
+  type        = list(string)
+  default = [
+    "repo:remida-egi-klea-s-greentrack@351971781/greentrack-gyals@1439962229",
+    "repo:remida-egi-klea-s-greentrack/greentrack-gyals",
+  ]
+}
+
 variable "name_prefix" {
   description = "Prefiksi i roleve të krijuara këtu"
   type        = string
