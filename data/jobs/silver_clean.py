@@ -27,17 +27,19 @@ NUMERIC_COLUMNS = {
 # Null rate: the raw file has about 1.25 % missing readings, so completeness must stay above 98 %.
 # Ranges (UCI dataset description): active power up to ~11 kW, voltage ~223-254 V, sub-meters 0-88 Wh.
 # Duplicates: exactly one row per timestamp.
+# Ranges count non-null values outside the range (nulls are covered by Completeness): ColumnValues with a
+# threshold returned NULL on these columns in the first AWS run (13 Nov 2026), so CustomSql is used instead.
 DQ_RULESET = """Rules = [
     RowCount > 1000000,
     IsComplete "timestamp",
     IsUnique "timestamp",
     Completeness "global_active_power" > 0.98,
     Completeness "voltage" > 0.98,
-    ColumnValues "global_active_power" between 0 and 15 with threshold > 0.98,
-    ColumnValues "voltage" between 200 and 260 with threshold > 0.98,
-    ColumnValues "sub_metering_1" between -1 and 100 with threshold > 0.98,
-    ColumnValues "sub_metering_2" between -1 and 100 with threshold > 0.98,
-    ColumnValues "sub_metering_3" between -1 and 100 with threshold > 0.98
+    CustomSql "select count(*) from primary where global_active_power < 0 or global_active_power > 15" = 0,
+    CustomSql "select count(*) from primary where voltage < 200 or voltage > 260" = 0,
+    CustomSql "select count(*) from primary where sub_metering_1 < 0 or sub_metering_1 > 100" = 0,
+    CustomSql "select count(*) from primary where sub_metering_2 < 0 or sub_metering_2 > 100" = 0,
+    CustomSql "select count(*) from primary where sub_metering_3 < 0 or sub_metering_3 > 100" = 0
 ]"""
 DQ_CONTEXT = "silver_household_power"  # name of the evaluation in the Glue Data Quality results
 
