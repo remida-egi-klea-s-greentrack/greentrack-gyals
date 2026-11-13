@@ -268,13 +268,15 @@ data "aws_iam_policy_document" "plan_stacks" {
     actions = [
       "glue:GetDatabase", "glue:GetDatabases", "glue:GetTable", "glue:GetTables", "glue:GetJob", "glue:GetTags",
       "athena:GetWorkGroup", "athena:ListTagsForResource",
-      "states:DescribeStateMachine", "states:ListTagsForResource",
+      "states:DescribeStateMachine", "states:ListTagsForResource", "states:ListStateMachineVersions",
+      "states:ListStateMachineAliases",
       "events:DescribeRule", "events:ListTargetsByRule", "events:ListTagsForResource",
       "sagemaker:Describe*", "sagemaker:List*", "sagemaker:Get*",
       "bedrock:GetGuardrail", "bedrock:GetKnowledgeBase", "bedrock:GetDataSource", "bedrock:ListTagsForResource",
       "s3vectors:GetVectorBucket", "s3vectors:GetIndex", "s3vectors:ListTagsForResource",
       "logs:DescribeLogGroups", "logs:ListTagsForResource", "logs:ListTagsLogGroup",
       "iam:GetRolePolicy", "iam:GetOpenIDConnectProvider", "iam:ListOpenIDConnectProviders",
+      "lakeformation:ListPermissions", "lakeformation:GetDataLakeSettings",
     ]
     resources = ["*"]
   }
