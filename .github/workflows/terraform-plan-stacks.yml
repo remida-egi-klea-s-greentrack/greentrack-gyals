@@ -1,0 +1,89 @@
+name: Terraform Plan (data + ML)
+
+# Plan of the data stack (infra/data) and the ML/GenAI stack (infra/ml) on every PR that touches them.
+# Read-only: role g2-greentrack-github-plan (OIDC, policy terraform-plan-data-ml-readonly) and -lock=false.
+# Variables: ML_TFVARS - repository variable with the contents of infra/ml/datamax.tfvars (no secrets:
+# region, prefix, built-in algorithm images, model artifact URIs).
+
+on:
+  pull_request:
+    paths:
+      - "infra/data/**"
+      - "infra/ml/**"
+      - "infra/modules/data/**"
+      - "infra/modules/ml/**"
+      - "infra/modules/genai/**"
+      - "data/jobs/**"
+      - "ml/inference/**"
+      - "ml/pipeline/**"
+      - "ml/forecasting/**"
+      - "genai/assistant/**"
+      - "genai/knowledge_base/**"
+      - ".github/workflows/terraform-plan-stacks.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-central-1
+  PLAN_ROLE_ARN: arn:aws:iam::886565871385:role/g2-greentrack-github-plan
+  STATE_BUCKET: g2-greentrack-tfstate-886565871385
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: [data, ml]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.6
+
+      - name: Configure AWS credentials (OIDC, read-only)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.PLAN_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Variables
+        working-directory: infra/${{ matrix.stack }}
+        env:
+          ML_TFVARS: ${{ vars.ML_TFVARS }}
+        run: |
+          if [ "${{ matrix.stack }}" = "ml" ]; then
+            printf '%s\n' "$ML_TFVARS" > ci.tfvars
+          else
+            printf 'region = "%s"\nname_prefix = "g2-greentrack"\nenvironment = "datamax"\n' "$AWS_REGION" > ci.tfvars
+          fi
+
+      - name: Terraform init
+        working-directory: infra/${{ matrix.stack }}
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${STATE_BUCKET}" \
+            -backend-config="key=${{ matrix.stack }}/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+
+      - name: Terraform plan
+        working-directory: infra/${{ matrix.stack }}
+        run: |
+          set -o pipefail
+          terraform plan -input=false -no-color -lock=false -var-file=ci.tfvars | tee plan.txt
+
+      - name: Plan summary
+        if: always()
+        working-directory: infra/${{ matrix.stack }}
+        run: |
+          {
+            echo "## Terraform plan (${{ matrix.stack }})"
+            echo '```'
+            grep -E '^\s*# |^Plan:|^No changes' plan.txt || echo "plan.txt missing"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
