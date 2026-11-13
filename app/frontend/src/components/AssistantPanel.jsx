@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { parseCitation } from "../lib/stats.js";
 
 // Side panel for the energy assistant (POST /chat, contracts/chat.json).
-// Props: api - base URL of the API; open - whether the panel is shown; onClose - closes it.
+// Props: api - base URL of the API; open - whether the panel is shown; onClose - closes it;
+//        t - interface text in the chosen language (lib/i18n.js).
 // State: history - list of { role, content, citations }; input - text being typed; busy - waiting for /chat.
-export default function AssistantPanel({ api, open, onClose }) {
+export default function AssistantPanel({ api, open, onClose, t }) {
   const [history, setHistory] = useState([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -40,22 +41,22 @@ export default function AssistantPanel({ api, open, onClose }) {
       const data = await res.json();
       setHistory((h) => [...h, { role: "assistant", content: data.answer, citations: data.citations || [] }]);
     } catch (err) {
-      setHistory((h) => [...h, { role: "assistant", content: `Asistenti nuk u përgjigj (${err.message}). Provo përsëri.`, citations: [], error: true }]);
+      setHistory((h) => [...h, { role: "assistant", content: t.assistantError(err.message), citations: [], error: true }]);
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <aside className={`assistant ${open ? "is-open" : ""}`} aria-label="Asistenti i energjisë" aria-hidden={!open} inert={!open}>
+    <aside className={`assistant ${open ? "is-open" : ""}`} aria-label={t.assistant} aria-hidden={!open} inert={!open}>
       <header className="assistant__head">
-        <h2>Asistenti i energjisë</h2>
-        <button type="button" className="icon-btn" onClick={onClose} aria-label="Mbyll asistentin">✕</button>
+        <h2>{t.assistant}</h2>
+        <button type="button" className="icon-btn" onClick={onClose} aria-label={t.closeAssistant}>✕</button>
       </header>
 
       <div className="assistant__list" ref={listRef} aria-live="polite">
         {history.length === 0 && (
-          <p className="muted">Pyet për konsumin, orët e pikut, anomalitë ose si të kursesh energji.</p>
+          <p className="muted">{t.assistantHint}</p>
         )}
         {history.map((m, i) => (
           <div key={i} className={`bubble bubble--${m.role} ${m.error ? "bubble--error" : ""}`}>
@@ -74,13 +75,13 @@ export default function AssistantPanel({ api, open, onClose }) {
             )}
           </div>
         ))}
-        {busy && <div className="bubble bubble--assistant muted">Po mendon…</div>}
+        {busy && <div className="bubble bubble--assistant muted">{t.thinking}</div>}
       </div>
 
       <form className="assistant__form" onSubmit={send}>
-        <label htmlFor="ask" className="sr-only">Pyetja jote</label>
-        <input id="ask" ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)} placeholder="Pyet për konsumin…" disabled={busy} />
-        <button type="submit" className="btn-primary" disabled={busy || !input.trim()}>Dërgo</button>
+        <label htmlFor="ask" className="sr-only">{t.yourQuestion}</label>
+        <input id="ask" ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)} placeholder={t.askPlaceholder} disabled={busy} />
+        <button type="submit" className="btn-primary" disabled={busy || !input.trim()}>{t.send}</button>
       </form>
     </aside>
   );
