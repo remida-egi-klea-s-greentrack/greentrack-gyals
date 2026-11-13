@@ -1,4 +1,5 @@
-"""Read ML results (forecasts, anomalies) written to DynamoDB by the ML loader."""
+"""Read results from DynamoDB: forecasts and anomalies (ML loader) and hourly consumption
+(app/data/load_consumption_table.py)."""
 import os
 from decimal import Decimal
 from typing import Any, Dict, List
@@ -64,3 +65,10 @@ def load_anomalies(limit: int = 20) -> Dict[str, Any]:
         for i in items
     ]
     return {"household_id": HOUSEHOLD_ID, "anomalies": anomalies}
+
+
+def load_consumption(limit: int = 100) -> Dict[str, Any]:
+    """Newest `limit` complete hours from the consumption table, oldest first (contract: consumption.json)."""
+    items = _query_latest("DYNAMODB_TABLE_CONSUMPTION", limit)
+    records = [{k: v for k, v in i.items() if k != "household_id"} for i in items]
+    return {"unit": "kWh", "household_id": HOUSEHOLD_ID, "records": records}
