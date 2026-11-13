@@ -14,6 +14,33 @@ locals {
     for key, arn in var.dynamodb_table_arns :
     key => split("/", arn)[1]
   }
+
+  # App configuration lives in SSM Parameter Store under this path; the Lambda reads it at cold start
+  # (app/adapters/config.py). Empty values are skipped (SSM does not store empty strings).
+  config_path = "/${var.name_prefix}/api"
+  app_config = { for name, value in merge(
+    {
+      HOUSEHOLD_ID = var.household_id
+      GOLD_BUCKET  = "g2-greentrack-gold-${data.aws_caller_identity.current.account_id}" # Gold CSV exports (Developer A)
+      GOLD_PREFIX  = "exports/"
+    },
+    {
+      DYNAMODB_TABLE_CONSUMPTION = lookup(local.table_names, "consumption", "")
+      DYNAMODB_TABLE_ANOMALIES   = lookup(local.table_names, "anomalies", "")
+      DYNAMODB_TABLE_FORECASTS   = lookup(local.table_names, "forecasts", "")
+    }
+  ) : name => value if value != "" }
+}
+
+data "aws_caller_identity" "current" {}
+
+data "aws_region" "current" {}
+
+resource "aws_ssm_parameter" "config" {
+  for_each = local.app_config
+  name     = "${local.config_path}/${each.key}"
+  type     = "String"
+  value    = each.value
 }
 
 data "aws_iam_policy_document" "lambda_assume" {
@@ -91,6 +118,29 @@ resource "aws_iam_policy" "s3_gold_access" {
   policy      = data.aws_iam_policy_document.s3_gold_access.json
 }
 
+# Read the app configuration from SSM Parameter Store
+data "aws_iam_policy_document" "ssm_config" {
+  statement {
+    sid     = "ReadAppConfig"
+    actions = ["ssm:GetParametersByPath", "ssm:GetParameters", "ssm:GetParameter"]
+    resources = [
+      "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${local.config_path}",
+      "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${local.config_path}/*",
+    ]
+  }
+}
+
+resource "aws_iam_policy" "ssm_config" {
+  name        = "${var.name_prefix}-lambda-ssm-config"
+  description = "Allow Lambda functions to read the app configuration in SSM Parameter Store"
+  policy      = data.aws_iam_policy_document.ssm_config.json
+}
+
+resource "aws_iam_role_policy_attachment" "ssm_config" {
+  role       = aws_iam_role.lambda.name
+  policy_arn = aws_iam_policy.ssm_config.arn
+}
+
 resource "aws_iam_role_policy_attachment" "s3_gold" {
   role       = aws_iam_role.lambda.name
   policy_arn = aws_iam_policy.s3_gold_access.arn
@@ -113,23 +163,15 @@ resource "aws_lambda_function" "this" {
 
   # Gold data lexohet si CSV me csv + boto3, prandaj nuk duhet layer pandas/pyarrow.
 
+  # Configuration values are in SSM (aws_ssm_parameter.config); only their path is passed here.
   environment {
-    variables = merge(
-      {
-        REGION       = "eu-central-1"
-        HOUSEHOLD_ID = var.household_id
-        GOLD_BUCKET  = "g2-greentrack-gold-886565871385" # Gold CSV exports (Developer A)
-        GOLD_PREFIX  = "exports/"
-      },
-      length(local.table_names) > 0 ? {
-        # DynamoDB table names për Lambda environment variables
-        DYNAMODB_TABLE_CONSUMPTION = lookup(local.table_names, "consumption", "")
-        DYNAMODB_TABLE_ANOMALIES   = lookup(local.table_names, "anomalies", "")
-        # Tabela e re forecasts për ML predictions
-        DYNAMODB_TABLE_FORECASTS = lookup(local.table_names, "forecasts", "")
-      } : {}
-    )
+    variables = {
+      REGION          = data.aws_region.current.name
+      CONFIG_SSM_PATH = local.config_path
+    }
   }
+
+  depends_on = [aws_ssm_parameter.config, aws_iam_role_policy_attachment.ssm_config]
 }
 
 resource "aws_apigatewayv2_api" "this" {
