@@ -146,6 +146,13 @@ resource "aws_iam_role" "inference" {
 }
 
 data "aws_iam_policy_document" "inference" {
+  # Needed only when the gold location is registered with Lake Formation (enforce_gold in infra/data).
+  statement {
+    sid       = "LakeFormationDataAccess"
+    actions   = ["lakeformation:GetDataAccess"]
+    resources = ["*"]
+  }
+
   statement {
     sid       = "InvokeEndpoints"
     actions   = ["sagemaker:InvokeEndpoint"]
@@ -209,6 +216,13 @@ resource "aws_iam_role_policy" "inference" {
 
 # Training can read Gold exports directly from S3 (promised in the DATA-06 review).
 data "aws_iam_policy_document" "sagemaker_gold" {
+  # Needed only when the gold location is registered with Lake Formation (enforce_gold in infra/data).
+  statement {
+    sid       = "LakeFormationDataAccess"
+    actions   = ["lakeformation:GetDataAccess"]
+    resources = ["*"]
+  }
+
   statement {
     sid       = "GoldExportsList"
     actions   = ["s3:ListBucket", "s3:GetBucketLocation"]

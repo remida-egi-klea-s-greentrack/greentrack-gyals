@@ -158,6 +158,13 @@ resource "aws_iam_role" "assistant" {
 }
 
 data "aws_iam_policy_document" "assistant" {
+  # Needed only when the gold location is registered with Lake Formation (enforce_gold in infra/data).
+  statement {
+    sid       = "LakeFormationDataAccess"
+    actions   = ["lakeformation:GetDataAccess"]
+    resources = ["*"]
+  }
+
   # Converse needs InvokeModel on the inference profile and on the model in each EU region it routes to.
   statement {
     sid     = "InvokeClaude"

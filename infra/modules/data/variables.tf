@@ -29,3 +29,21 @@ variable "raw_file_name" {
 
 
 
+
+variable "enforce_gold" {
+  description = "Enforce Lake Formation on gold: register the bucket and revoke IAM-only access (false = grants only)"
+  type        = bool
+  default     = false
+}
+
+variable "api_role_name" {
+  description = "IAM role of the app's API Lambda (app stack), reader of gold"
+  type        = string
+  default     = "g2-greentrack-production-api-lambda"
+}
+
+variable "analyst_principal_arns" {
+  description = "People who query gold in Athena (e.g. the SSO role ARN), read-only"
+  type        = list(string)
+  default     = []
+}

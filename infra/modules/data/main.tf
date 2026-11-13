@@ -148,6 +148,13 @@ resource "aws_iam_role_policy_attachment" "glue_service" {
 
 # Read/write only our own buckets.
 data "aws_iam_policy_document" "glue_s3" {
+  # Needed only when the gold location is registered with Lake Formation (enforce_gold in infra/data).
+  statement {
+    sid       = "LakeFormationDataAccess"
+    actions   = ["lakeformation:GetDataAccess"]
+    resources = ["*"]
+  }
+
   statement {
     actions   = ["s3:ListBucket", "s3:GetBucketLocation"]
     resources = [for b in aws_s3_bucket.this : b.arn]

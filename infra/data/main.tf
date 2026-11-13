@@ -1,4 +1,4 @@
-# Data stack: lake buckets, Glue catalog, Glue jobs and Athena.
+# Data stack: lake buckets, Glue catalog, Glue jobs, Athena and Lake Formation permissions.
 
 provider "aws" {
   region = var.region
@@ -17,4 +17,7 @@ module "data" {
   source      = "../modules/data"
   name_prefix = var.name_prefix
   jobs_dir    = "${path.root}/../../data/jobs"
+
+  enforce_gold           = var.enforce_gold
+  analyst_principal_arns = var.analyst_principal_arns
 }
