@@ -23,6 +23,27 @@ NUMERIC_COLUMNS = {
 }
 
 
+# Glue Data Quality rules for the silver table (DQDL), run by the Glue job after the write.
+# Null rate: the raw file has about 1.25 % missing readings, so completeness must stay above 98 %.
+# Ranges (UCI dataset description): active power up to ~11 kW, voltage ~223-254 V, sub-meters 0-88 Wh.
+# Duplicates: exactly one row per timestamp.
+# Ranges count non-null values outside the range (nulls are covered by Completeness): ColumnValues with a
+# threshold returned NULL on these columns in the first AWS run (13 Nov 2026), so CustomSql is used instead.
+DQ_RULESET = """Rules = [
+    RowCount > 1000000,
+    IsComplete "timestamp",
+    IsUnique "timestamp",
+    Completeness "global_active_power" > 0.98,
+    Completeness "voltage" > 0.98,
+    CustomSql "select count(*) from primary where global_active_power < 0 or global_active_power > 15" = 0,
+    CustomSql "select count(*) from primary where voltage < 200 or voltage > 260" = 0,
+    CustomSql "select count(*) from primary where sub_metering_1 < 0 or sub_metering_1 > 100" = 0,
+    CustomSql "select count(*) from primary where sub_metering_2 < 0 or sub_metering_2 > 100" = 0,
+    CustomSql "select count(*) from primary where sub_metering_3 < 0 or sub_metering_3 > 100" = 0
+]"""
+DQ_CONTEXT = "silver_household_power"  # name of the evaluation in the Glue Data Quality results
+
+
 def parse_args():
     """Settings. With no arguments it runs locally; the Glue job passes S3 paths and catalog names."""
     parser = argparse.ArgumentParser()
@@ -101,6 +122,42 @@ def clean(bronze):
     )
 
 
+def failed_rules(outcomes):
+    """Rules that did not pass. outcomes: rows with "Rule", "Outcome" and "FailureReason" (Glue DQ output)."""
+    return [(r["Rule"], r["FailureReason"]) for r in outcomes if r["Outcome"] != "Passed"]
+
+
+def run_data_quality(spark, silver):
+    """Evaluate DQ_RULESET on the silver rows with Glue Data Quality (Glue only).
+
+    Results are published to the Glue Data Quality results and CloudWatch metrics, and printed;
+    a failed rule is reported, it does not stop the pipeline (gold has its own blocking checks).
+    """
+    from awsglue.context import GlueContext
+    from awsglue.dynamicframe import DynamicFrame
+    from awsgluedq.transforms import EvaluateDataQuality
+
+    glue = GlueContext(spark.sparkContext)
+    outcomes = EvaluateDataQuality.apply(
+        frame=DynamicFrame.fromDF(silver, glue, "silver"),
+        ruleset=DQ_RULESET,
+        publishing_options={
+            "dataQualityEvaluationContext": DQ_CONTEXT,
+            "enableDataQualityCloudWatchMetrics": True,
+            "enableDataQualityResultsPublishing": True,
+        },
+    ).toDF().collect()
+
+    print("\n===== SILVER DATA QUALITY =====")
+    for r in outcomes:
+        print(f"{r['Outcome']:<7} {r['Rule']}")
+    failed = failed_rules(outcomes)
+    print(f"{len(outcomes) - len(failed)}/{len(outcomes)} rules passed")
+    for rule, reason in failed:
+        print(f"FAILED {rule}: {reason}")
+    return failed
+
+
 def main():
     args = parse_args()
     spark = build_spark(args)
@@ -127,6 +184,9 @@ def main():
         print(f"Nulls in {name:<22} {nulls:,}")
     print(f"Iceberg table rows:       {spark.table(silver_table).count():,}")
     spark.table(silver_table).orderBy("timestamp").show(5, truncate=False)
+
+    if args.catalog == "glue":  # Glue Data Quality exists only in the Glue runtime
+        run_data_quality(spark, silver)
 
     spark.stop()
 
