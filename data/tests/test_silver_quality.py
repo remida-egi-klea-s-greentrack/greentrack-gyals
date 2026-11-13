@@ -7,7 +7,7 @@ from data.jobs.silver_clean import DQ_RULESET, failed_rules  # noqa: E402
 
 
 def test_ruleset_covers_null_rate_ranges_and_duplicates():
-    for rule in ('Completeness "global_active_power"', 'ColumnValues "voltage" between',
+    for rule in ('Completeness "global_active_power"', 'where voltage < 200 or voltage > 260',
                  'IsUnique "timestamp"', 'IsComplete "timestamp"'):
         assert rule in DQ_RULESET
 
