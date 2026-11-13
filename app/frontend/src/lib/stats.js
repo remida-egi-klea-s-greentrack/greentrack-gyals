@@ -6,9 +6,9 @@
 //   records     - /consumption records: timestamp, global_active_power_kwh, sub_metering_{1,2,3}_kwh
 //   anomalies   - /anomalies items: timestamp, detector, consumption_kwh, severity
 //   predictions - /forecast items: timestamp, predicted_kwh, actual_kwh (null for future hours)
+//   lang        - interface language, "sq" or "en" (month names come from lib/i18n.js)
 
-const MONTHS = ["janar", "shkurt", "mars", "prill", "maj", "qershor", "korrik", "gusht", "shtator", "tetor", "nëntor", "dhjetor"];
-const MONTHS_SHORT = ["Jan", "Shk", "Mar", "Pri", "Maj", "Qer", "Kor", "Gus", "Sht", "Tet", "Nën", "Dhj"];
+import { MONTHS, TEXT } from "./i18n.js";
 
 /** "YYYY-MM-DDTHH" key, so the same hour matches across endpoints. */
 export const hourKey = (ts) => String(ts).slice(0, 13);
@@ -19,29 +19,30 @@ const parts = (ts) => {
   return { y, m, d, hh: time.slice(0, 5) };
 };
 
-/** "20 nëntor 2010" (withYear) or "20 nëntor". */
-export function formatDay(ts, withYear = false) {
+/** "20 nëntor 2010" / "20 November 2010" (withYear), or without the year. */
+export function formatDay(ts, withYear = false, lang = "sq") {
   const { y, m, d } = parts(ts);
-  return `${d} ${MONTHS[m - 1]}${withYear ? ` ${y}` : ""}`;
+  return `${d} ${MONTHS[lang].long[m - 1]}${withYear ? ` ${y}` : ""}`;
 }
 
-/** "20 Nën" for chart ticks. */
-export const formatTick = (ts) => {
+/** "20 Nën" / "20 Nov" for chart ticks. */
+export const formatTick = (ts, lang = "sq") => {
   const { m, d } = parts(ts);
-  return `${d} ${MONTHS_SHORT[m - 1]}`;
+  return `${d} ${MONTHS[lang].short[m - 1]}`;
 };
 
 /** "18:00". */
 export const formatHour = (ts) => parts(ts).hh;
 
 /** "15–21 nëntor 2010", or "28 tetor – 3 nëntor 2010" across months. */
-export function formatRange(startTs, endTs) {
+export function formatRange(startTs, endTs, lang = "sq") {
   const a = parts(startTs);
   const b = parts(endTs);
+  const month = MONTHS[lang].long[a.m - 1];
   if (a.y === b.y && a.m === b.m) {
-    return a.d === b.d ? `${a.d} ${MONTHS[a.m - 1]} ${a.y}` : `${a.d}–${b.d} ${MONTHS[a.m - 1]} ${a.y}`;
+    return a.d === b.d ? `${a.d} ${month} ${a.y}` : `${a.d}–${b.d} ${month} ${a.y}`;
   }
-  return `${formatDay(startTs, a.y !== b.y)} – ${formatDay(endTs, true)}`;
+  return `${formatDay(startTs, a.y !== b.y, lang)} – ${formatDay(endTs, true, lang)}`;
 }
 
 /** Hours with a measured value, oldest first. */
@@ -63,21 +64,21 @@ export function peakHour(hours) {
 
 // Sub-meters of the UCI household dataset.
 const SUB_METERS = [
-  { key: "sub_metering_3_kwh", label: "Ngrohësi i ujit / Klima" },
-  { key: "sub_metering_2_kwh", label: "Lavanderia" },
-  { key: "sub_metering_1_kwh", label: "Kuzhina" },
+  { key: "sub_metering_3_kwh", label: "meterWaterAc" },
+  { key: "sub_metering_2_kwh", label: "meterLaundry" },
+  { key: "sub_metering_1_kwh", label: "meterKitchen" },
 ];
 
 /** kWh and share per sub-meter; "other" is what no sub-meter measures. Largest first. */
-export function consumptionShares(hours) {
+export function consumptionShares(hours, lang = "sq") {
   const total = totalKwh(hours);
   if (total <= 0) return [];
   const rows = SUB_METERS.map(({ key, label }) => ({
-    label,
+    label: TEXT[lang][label],
     kwh: hours.reduce((sum, r) => sum + (r[key] || 0), 0),
   }));
   const metered = rows.reduce((sum, r) => sum + r.kwh, 0);
-  rows.push({ label: "Të tjera (pa matës)", kwh: Math.max(total - metered, 0), other: true });
+  rows.push({ label: TEXT[lang].meterOther, kwh: Math.max(total - metered, 0), other: true });
   return rows
     .map((r) => ({ ...r, share: r.kwh / total }))
     .sort((a, b) => b.kwh - a.kwh);
@@ -108,4 +109,3 @@ export function parseCitation(text) {
   return match ? { title: match[1].trim(), url: match[2] } : { title: String(text) };
 }
 
-export const SEVERITY_LABEL = { high: "E lartë", medium: "Mesatare", low: "E ulët" };
