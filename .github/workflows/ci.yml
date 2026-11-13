@@ -96,3 +96,15 @@ jobs:
         run: |
           terraform init -backend=false
           terraform validate
+
+      - name: Validate data stack
+        working-directory: infra/data
+        run: |
+          terraform init -backend=false
+          terraform validate
+
+      - name: Validate ML stack
+        working-directory: infra/ml
+        run: |
+          terraform init -backend=false
+          terraform validate
