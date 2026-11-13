@@ -216,6 +216,56 @@ class MLResultsTest(unittest.TestCase):
         self.assertEqual(data["anomalies"][0]["anomaly_score"], 0.97)
         json.dumps(data)
 
+    @patch.dict("os.environ", {"DYNAMODB_TABLE_CONSUMPTION": "t-consumption"})
+    def test_consumption_reads_table_oldest_first_without_household_id(self):
+        from decimal import Decimal
+        from app.adapters.ml_results import load_consumption
+
+        items = [
+            {"household_id": "household-1", "timestamp": "2010-11-26T21:00:00",
+             "global_active_power_kwh": Decimal("1.5"), "minutes_recorded": Decimal("60"), "complete": True},
+            {"household_id": "household-1", "timestamp": "2010-11-26T20:00:00",
+             "global_active_power_kwh": Decimal("2.25"), "minutes_recorded": Decimal("60"), "complete": True},
+        ]
+        p, table = self._patch_query(items)
+        with p:
+            data = load_consumption(100)
+
+        self.assertEqual(table.query.call_args.kwargs["Limit"], 100)
+        self.assertEqual([r["timestamp"] for r in data["records"]], ["2010-11-26T20:00:00", "2010-11-26T21:00:00"])
+        self.assertNotIn("household_id", data["records"][0])
+        self.assertEqual(data["records"][0]["minutes_recorded"], 60)
+        json.dumps(data)
+
+    def test_consumption_handler_prefers_table_then_gold_csv(self):
+        from app.backend.consumption import default_loader
+
+        table_data = {"unit": "kWh", "household_id": "household-1",
+                      "records": [{"timestamp": "2010-11-26T21:00:00", "global_active_power_kwh": 1.5}]}
+        with patch("app.adapters.ml_results.load_consumption", return_value=table_data):
+            self.assertEqual(default_loader(), table_data)
+        gold = [{"timestamp": "2010-11-26T20:00:00", "global_active_power_kwh": 2.0, "complete": True}]
+        with patch("app.adapters.ml_results.load_consumption", return_value={"records": []}), \
+             patch("app.adapters.gold_loader.load_hourly_consumption", return_value=gold):
+            self.assertEqual(default_loader()["records"], gold)
+
+    def test_loader_writes_only_complete_hours_as_decimal(self):
+        from decimal import Decimal
+        from app.data.load_consumption_table import complete_items
+
+        rows = [
+            {"timestamp": "2010-11-26T20:00:00", "global_active_power_kwh": "2.25", "sub_metering_1_kwh": "",
+             "sub_metering_2_kwh": "0.1", "sub_metering_3_kwh": "0.5", "minutes_recorded": "60", "complete": "true"},
+            {"timestamp": "2010-11-26T21:00:00", "global_active_power_kwh": "", "sub_metering_1_kwh": "",
+             "sub_metering_2_kwh": "", "sub_metering_3_kwh": "", "minutes_recorded": "12", "complete": "false"},
+        ]
+        items = complete_items(rows, "household-1")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["household_id"], "household-1")
+        self.assertEqual(items[0]["global_active_power_kwh"], Decimal("2.25"))
+        self.assertNotIn("sub_metering_1_kwh", items[0])  # null dropped
+        self.assertEqual(items[0]["minutes_recorded"], 60)
+
     def test_handlers_fall_back_to_fixtures_when_table_empty(self):
         from app.backend.anomalies import handler as anomalies_handler
         from app.backend.forecast import handler as forecast_handler
