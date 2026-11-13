@@ -11,8 +11,8 @@ daily and weekly seasonal naive baselines.
 - Validation: 2010-01-01 through 2010-05-31
 - Test: 2010-06-01 through 2010-11-25
 
-The test period is reserved for final model comparison.
-Do not use its forecasting errors for model selection or tuning.
+The test period is used only for the final comparison of the frozen model
+(see "Held-out test result"). Its errors were never used for model selection or tuning.
 
 ## Forecasting protocol
 
@@ -155,11 +155,11 @@ The script saves:
 ### Limitations
 
 - No hyperparameter optimization has been performed.
-- The June–November 2010 test period remains reserved.
+- The June–November 2010 test period was evaluated once, with the frozen model (see "Held-out test result").
 - Validation performance does not guarantee test performance.
 - Nonnegative predictions are not enforced by the regressor.
 - End-to-end reproducibility depends on the upstream hourly ETL.
-- SageMaker deployment is outside ML-03's scope.
+- SageMaker deployment is outside ML-03's scope; it is covered in "AWS deployment (Challenge 3)".
 
 ## ML-04 — Electricity consumption anomaly detection
 
@@ -175,7 +175,7 @@ The local baseline uses global hour-of-week log-MAD:
 
 Fitting requires at least 30 valid observations per hour-of-week group and positive MAD in every group.
 
-This is an interpretable local benchmark for the planned SageMaker Random Cut Forest implementation, not a production-validated anomaly alarm.
+This is the primary, interpretable detector, not a production-validated anomaly alarm. SageMaker Random Cut Forest runs next to it as a secondary detector (see "AWS deployment (Challenge 3)").
 
 ### Data split and leakage prevention
 
@@ -276,4 +276,74 @@ Automated tests:
 - The validation window does not cover August holiday behavior.
 - Repeated alerts may belong to one incident; notification deduplication is separate from scoring.
 - The prepared hourly reference dataset still needs integration with the reproducible upstream data pipeline.
-- SageMaker Random Cut Forest, AWS deployment, and model comparison remain future work.
+- The RCF threshold has not been evaluated on the held-out period.
+
+## Held-out test result (forecast)
+
+The model registered as `g2-greentrack-forecast/1` (settings frozen after validation) was evaluated
+once on 2010-06-01 through 2010-11-25. Nothing was tuned after this run.
+
+| Model | RMSE (kWh) | MAPE (%) | WAPE (%) |
+| --- | ---: | ---: | ---: |
+| Daily naive | 0.7184 | 62.42 | 51.33 |
+| Weekly naive | 0.7730 | 76.82 | 57.78 |
+| XGBoost | 0.5653 | 62.09 | 44.19 |
+
+XGBoost beats both baselines on all three metrics. Its MAPE margin over the daily baseline is small
+(0.33 points) because MAPE is inflated by low-consumption hours; WAPE (total absolute error divided by
+total consumption) shows the difference more fairly.
+
+## AWS deployment (Challenge 3)
+
+All resources are Terraform (`infra/modules/ml`, applied from `infra/ml`) in `eu-central-1` with the
+`g2-greentrack` prefix.
+
+### Training pipeline and Model Registry
+
+`g2-greentrack-forecast-pipeline` (`infra/modules/ml/pipeline.tf`, step code `ml/pipeline/steps.py`):
+
+1. **Prepare** — reads the Gold hourly table through Athena and builds the same features as ML-03.
+2. **Train** — built-in SageMaker XGBoost with the frozen ML-03 settings, on spot instances.
+3. **Evaluate** — validation window (Jan–May 2010) against the daily and weekly seasonal baselines.
+4. **Register** — only if XGBoost beats the best baseline, into the Model Package Group
+   `g2-greentrack-forecast` with status `PendingManualApproval`; a person approves the package.
+
+Validation in the pipeline: RMSE 0.6253 vs 0.8721 (weekly) and 0.8818 (daily), MAE 0.4703 vs 0.6108.
+The small difference from the local ML-03 figures comes from the built-in algorithm container.
+
+The GitHub Actions workflow **ML Pipeline** (`.github/workflows/ml-pipeline.yml`, manual trigger on
+`main`) starts a run and waits for it. It signs in to AWS with OIDC (repository secret
+`ML_PIPELINE_ROLE_ARN`); no access keys are stored.
+
+### Random Cut Forest (secondary anomaly detector)
+
+- Built-in SageMaker RCF on raw hourly kWh, 24-hour shingles (`ml/sagemaker/prepare_rcf_data.py`).
+- Trained on data through 2008; alert thresholds from 2009 scores (out of sample).
+- Confirmation run on SageMaker, validation Jan–May 2010: 1 RCF alert vs 37 log-MAD alerts under the
+  same scheme. On injected x3 spikes at busy hours RCF caught 10.0 % vs 3.5 % for log-MAD.
+- RCF is a weak detector on its own. It is kept because it flags some unusually large busy-hour values
+  that log-MAD misses. The two detectors keep separate scores (`detector` field), with no merged severity.
+
+### Inference
+
+- Two serverless endpoints, `g2-greentrack-xgboost-serverless` and `g2-greentrack-rcf-serverless`,
+  created only when `enable_endpoints = true`.
+- `ml/inference/calibrate.py` writes `inference/params.json` (log-MAD statistics and both detectors'
+  2009 reference scores) to the ML bucket, once.
+- Lambda `g2-greentrack-ml-inference` (`ml/inference/handler.py`) returns the forecast and the anomaly
+  scores of both detectors for a window of up to 7 days:
+
+```json
+{"start": "2010-01-24T00:00:00", "end": "2010-01-25T00:00:00"}
+```
+
+  Check run for 24 Jan 2010: 24 hourly predictions, log-MAD scored 24/24 hours, RCF 17/24 (the first
+  hours are unscored because their 24-hour window contains an incomplete hour).
+- `ml/inference/load_dynamodb.py` calls the Lambda week by week and writes the results to the app's
+  `forecasts` and `anomalies` tables, which the API reads. For production pass
+  `--forecasts-table g2-greentrack-production-forecasts --anomalies-table g2-greentrack-production-anomalies`.
+
+### Cost and teardown
+
+Spot training, serverless endpoints and small instance types. After the demo set
+`enable_endpoints = false` and apply `infra/ml` again to remove the endpoints.
