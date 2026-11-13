@@ -8,8 +8,11 @@ import pandas as pd
 
 def load_hourly_consumption(path: Path) -> pd.Series:
     """Load and validate complete/incomplete hourly consumption records."""
-    df = pd.read_parquet(path)
+    return hourly_series(pd.read_parquet(path))
 
+
+def hourly_series(df: pd.DataFrame) -> pd.Series:
+    """Validate hourly records (timestamp, global_active_power_kwh, complete) and return the series."""
     required = {"timestamp", "global_active_power_kwh", "complete"}
     missing = required - set(df.columns)
     if missing:
