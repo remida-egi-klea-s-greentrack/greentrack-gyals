@@ -1,6 +1,12 @@
 import json
 from pathlib import Path
 
+from app.adapters.config import load_ssm_config
+
+# Every handler imports this module first, so the SSM configuration is in os.environ
+# before any adapter reads it (once per Lambda container).
+load_ssm_config()
+
 # Folderi fixtures ndodhet dy nivele mbi këtë skedar
 FIXTURES_DIR = Path(__file__).resolve().parents[2] / "fixtures"
 

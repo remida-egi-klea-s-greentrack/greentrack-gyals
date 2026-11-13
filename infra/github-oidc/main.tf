@@ -30,6 +30,8 @@ locals {
   assistant    = "arn:aws:lambda:${local.region}:${local.account_id}:function:${var.assistant_function_name}"
   apigw_arns   = ["arn:aws:apigateway:${local.region}::/apis", "arn:aws:apigateway:${local.region}::/apis/*", "arn:aws:apigateway:${local.region}::/tags/*"]
   state_bucket = "arn:aws:s3:::${var.state_bucket}"
+  # App configuration parameters (infra/modules/api: /<prefix>/api/*)
+  ssm_arns = [for p in var.managed_prefixes : "arn:aws:ssm:${local.region}:${local.account_id}:parameter/${p}/*"]
 }
 
 # ---------------------------------------------------------------------------
@@ -104,8 +106,15 @@ data "aws_iam_policy_document" "plan" {
       "s3:GetReplicationConfiguration", "s3:GetEncryptionConfiguration", "s3:ListBucket",
       "apigateway:GET",
       "sts:GetCallerIdentity",
+      "ssm:DescribeParameters",
     ]
     resources = ["*"]
+  }
+
+  statement {
+    sid       = "ReadAppConfig"
+    actions   = ["ssm:GetParameter", "ssm:GetParameters", "ssm:ListTagsForResource"]
+    resources = local.ssm_arns
   }
 }
 
@@ -234,6 +243,18 @@ data "aws_iam_policy_document" "deploy" {
   statement {
     sid       = "Identity"
     actions   = ["sts:GetCallerIdentity"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "AppConfigParameters"
+    actions   = ["ssm:PutParameter", "ssm:GetParameter", "ssm:GetParameters", "ssm:DeleteParameter", "ssm:AddTagsToResource", "ssm:RemoveTagsFromResource", "ssm:ListTagsForResource"]
+    resources = local.ssm_arns
+  }
+
+  statement {
+    sid       = "DescribeParameters"
+    actions   = ["ssm:DescribeParameters"]
     resources = ["*"]
   }
 }
