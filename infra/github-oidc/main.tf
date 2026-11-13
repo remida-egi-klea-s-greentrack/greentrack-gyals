@@ -250,3 +250,46 @@ resource "aws_iam_role_policy" "deploy" {
   role   = aws_iam_role.deploy.id
   policy = data.aws_iam_policy_document.deploy.json
 }
+
+# ---------------------------------------------------------------------------
+# Plan role, data and ML stacks: read-only refresh of infra/data and infra/ml
+# (workflow terraform-plan-stacks.yml). Metadata reads, the two state files and the stacks' own S3 objects.
+# Bucket settings, Lambda and IAM role reads come from the DescribeStack statement above.
+# ---------------------------------------------------------------------------
+data "aws_iam_policy_document" "plan_stacks" {
+  statement {
+    sid       = "StacksStateRead"
+    actions   = ["s3:GetObject"]
+    resources = ["${local.state_bucket}/data/*", "${local.state_bucket}/ml/*"]
+  }
+
+  statement {
+    sid = "DescribeDataAndMlStacks"
+    actions = [
+      "glue:GetDatabase", "glue:GetDatabases", "glue:GetTable", "glue:GetTables", "glue:GetJob", "glue:GetTags",
+      "athena:GetWorkGroup", "athena:ListTagsForResource",
+      "states:DescribeStateMachine", "states:ListTagsForResource", "states:ListStateMachineVersions",
+      "states:ListStateMachineAliases",
+      "events:DescribeRule", "events:ListTargetsByRule", "events:ListTagsForResource",
+      "sagemaker:Describe*", "sagemaker:List*", "sagemaker:Get*",
+      "bedrock:GetGuardrail", "bedrock:GetKnowledgeBase", "bedrock:GetDataSource", "bedrock:ListTagsForResource",
+      "s3vectors:GetVectorBucket", "s3vectors:GetIndex", "s3vectors:ListTagsForResource",
+      "logs:DescribeLogGroups", "logs:ListTagsForResource", "logs:ListTagsLogGroup",
+      "iam:GetRolePolicy", "iam:GetOpenIDConnectProvider", "iam:ListOpenIDConnectProviders",
+      "lakeformation:ListPermissions", "lakeformation:GetDataLakeSettings",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "StackObjects"
+    actions   = ["s3:GetObject", "s3:GetObjectTagging"]
+    resources = ["arn:aws:s3:::g2-greentrack-*/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "plan_stacks" {
+  name   = "terraform-plan-data-ml-readonly"
+  role   = aws_iam_role.plan.id
+  policy = data.aws_iam_policy_document.plan_stacks.json
+}
