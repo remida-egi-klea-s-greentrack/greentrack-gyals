@@ -2,7 +2,15 @@ from app.backend.common import response
 
 
 def default_loader(name="consumption.json"):
-    """Load consumption from gold CSV exports, fallback to fixtures."""
+    """Load consumption from the DynamoDB table, then gold CSV exports, then fixtures."""
+    try:
+        from app.adapters.ml_results import load_consumption
+        data = load_consumption(limit=100)
+        if data["records"]:
+            return data
+        print("WARN consumption table is empty; trying gold CSV exports")
+    except Exception as e:
+        print(f"WARN failed to read consumption table: {e}; trying gold CSV exports")
     try:
         from app.adapters.gold_loader import load_hourly_consumption
         records = load_hourly_consumption(limit=100)
