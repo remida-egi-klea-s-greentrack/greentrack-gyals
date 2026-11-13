@@ -43,15 +43,12 @@ data "aws_iam_policy_document" "dynamodb_access" {
     sid    = "DynamoDBAccess"
     effect = "Allow"
 
+    # Read-only: the API only reads; the tables are loaded by the ML loader (ml/inference/load_dynamodb.py)
     actions = [
       "dynamodb:GetItem",
-      "dynamodb:PutItem",
       "dynamodb:Query",
       "dynamodb:Scan",
-      "dynamodb:UpdateItem",
-      "dynamodb:DeleteItem",
-      "dynamodb:BatchGetItem",
-      "dynamodb:BatchWriteItem"
+      "dynamodb:BatchGetItem"
     ]
 
     resources = values(var.dynamodb_table_arns)
